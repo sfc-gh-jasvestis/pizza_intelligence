@@ -1,4 +1,4 @@
-# 🍕 Pizza Time Machine Kitchen
+# 🍕 The Insight Kitchen
 
 ## Snowflake Intelligence Demo for QSR Partners
 
