@@ -19,7 +19,8 @@ pizza/
 │   ├── 04_load_orders_data.sql  # Load orders and deliveries
 │   ├── 05_load_inventory_staffing.sql  # Load inventory and staffing
 │   ├── 06_setup_cortex_search.sql      # Create Cortex Search service
-│   └── 07_create_agent.sql      # Agent configuration reference
+│   ├── 07_create_agent.sql      # Agent configuration reference
+│   └── 08_create_views.sql      # Pre-joined views for semantic model
 ├── semantic_models/
 │   └── pizza_intelligence.yaml  # QSR Master Semantic Model
 └── documents/                   # Sample unstructured documents
@@ -50,6 +51,7 @@ Execute the SQL scripts in order using Snowsight or your preferred SQL client:
 -- 05_load_inventory_staffing.sql
 -- 06_setup_cortex_search.sql
 -- 07_create_agent.sql
+-- 08_create_views.sql
 ```
 
 ### Step 2: Upload Semantic Model
