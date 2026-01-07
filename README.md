@@ -208,6 +208,6 @@ For demo issues or questions:
 
 ---
 
-**Built for the Pizza Time Machine Kitchen Partner Demo**  
+**Built for the Insight Kitchen Partner Demo**  
 *Snowflake Intelligence - From Data to Competitive Advantage*
 
