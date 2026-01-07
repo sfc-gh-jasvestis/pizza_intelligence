@@ -1,0 +1,1039 @@
+# ============================================================================
+# PIZZA INTELLIGENCE - QSR Master Semantic Model
+# Cortex Analyst Semantic Model for Pizza Time Machine Kitchen
+# ============================================================================
+# This semantic model is the partner's reusable IP - build once for pizza,
+# reuse for burgers, tacos, coffee, and other QSR brands.
+# ============================================================================
+
+name: pizza_intelligence
+description: |
+  QSR Master Schema for Pizza Intelligence - enabling natural language queries 
+  over pizza operations data including orders, deliveries, inventory, staffing, 
+  and campaign performance. This semantic model powers the Pizza Time Machine 
+  Kitchen, turning scattered data into actionable intelligence about past 
+  performance, current operations, and future predictions.
+
+# ============================================================================
+# TABLES
+# ============================================================================
+tables:
+
+  # --------------------------------------------------------------------------
+  # ORDERS - Core transaction data (pre-joined with store and calendar)
+  # --------------------------------------------------------------------------
+  - name: orders
+    description: |
+      All pizza orders across all channels (app, web, phone, in-store, third-party).
+      Each record represents a complete order with totals, discounts, and metadata.
+      Includes store details (name, city, region) and calendar info (game days, weather).
+      Use this table to analyze sales performance, order patterns, and revenue.
+    base_table:
+      database: PIZZA_INTELLIGENCE
+      schema: ANALYTICS
+      table: V_ORDERS
+    
+    dimensions:
+      - name: order_id
+        description: Unique identifier for each order
+        expr: order_id
+        data_type: VARCHAR
+        unique: true
+        
+      - name: order_date
+        description: Date when the order was placed
+        expr: order_date
+        data_type: DATE
+        
+      - name: store_id
+        description: Store identifier
+        expr: store_id
+        data_type: VARCHAR
+        
+      - name: store_name
+        description: Name of the store location
+        expr: store_name
+        data_type: VARCHAR
+        
+      - name: city
+        description: City where the store is located
+        expr: city
+        data_type: VARCHAR
+        sample_values: ['Phoenix', 'Chicago', 'New York', 'Los Angeles', 'Miami']
+        
+      - name: state
+        description: State where the store is located
+        expr: state
+        data_type: VARCHAR
+        
+      - name: region
+        description: Geographic region
+        expr: region
+        data_type: VARCHAR
+        sample_values: ['Southwest', 'Midwest', 'Northeast', 'West', 'Southeast']
+        
+      - name: district
+        description: District/metro area
+        expr: district
+        data_type: VARCHAR
+        
+      - name: order_channel
+        description: How the order was placed - app, web, phone, in_store, or third_party
+        expr: order_channel
+        data_type: VARCHAR
+        sample_values: ['app', 'web', 'phone', 'in_store', 'third_party']
+        
+      - name: order_type
+        description: Fulfillment type - delivery, pickup, or dine_in
+        expr: order_type
+        data_type: VARCHAR
+        sample_values: ['delivery', 'pickup', 'dine_in']
+        
+      - name: payment_method
+        description: How the customer paid
+        expr: payment_method
+        data_type: VARCHAR
+        sample_values: ['credit_card', 'debit_card', 'apple_pay', 'cash']
+        
+      - name: is_first_order
+        description: Whether this was the customer's first order (true/false)
+        expr: is_first_order
+        data_type: BOOLEAN
+        
+      - name: customer_id
+        description: Customer who placed the order
+        expr: customer_id
+        data_type: VARCHAR
+        
+      - name: campaign_id
+        description: Campaign associated with the order if any
+        expr: campaign_id
+        data_type: VARCHAR
+        
+      - name: day_of_week
+        description: Day of the week (Monday, Tuesday, etc.)
+        expr: day_of_week
+        data_type: VARCHAR
+        
+      - name: is_weekend
+        description: Whether the order was placed on a weekend
+        expr: is_weekend
+        data_type: BOOLEAN
+        
+      - name: is_game_day
+        description: Whether there was a sports event that day
+        expr: is_game_day
+        data_type: BOOLEAN
+        synonyms: ['game night', 'sports event']
+        
+      - name: game_event
+        description: Name of the game/event if any
+        expr: game_event
+        data_type: VARCHAR
+        
+      - name: weather_condition
+        description: Weather on order date
+        expr: weather_condition
+        data_type: VARCHAR
+        sample_values: ['sunny', 'rainy', 'hot', 'cold']
+
+    time_dimensions:
+      - name: order_timestamp
+        description: Exact date and time when the order was placed
+        expr: order_timestamp
+        data_type: TIMESTAMP_NTZ
+
+    measures:
+      - name: total_orders
+        description: Count of orders
+        expr: COUNT(DISTINCT order_id)
+        data_type: NUMBER
+        
+      - name: total_revenue
+        description: Total revenue from orders including tax, delivery fees, and tips
+        expr: SUM(total_amount)
+        data_type: NUMBER
+        
+      - name: net_sales
+        description: Sales before tax, fees, and tips (subtotal minus discounts)
+        expr: SUM(subtotal - discount_amount)
+        data_type: NUMBER
+        
+      - name: total_discounts
+        description: Total discount amount given
+        expr: SUM(discount_amount)
+        data_type: NUMBER
+        
+      - name: average_order_value
+        description: Average revenue per order
+        expr: AVG(total_amount)
+        data_type: NUMBER
+        synonyms: ['AOV', 'avg order value', 'average ticket']
+        
+      - name: total_items_sold
+        description: Total number of items across all orders
+        expr: SUM(item_count)
+        data_type: NUMBER
+        
+      - name: new_customer_orders
+        description: Count of first-time customer orders
+        expr: COUNT(DISTINCT CASE WHEN is_first_order THEN order_id END)
+        data_type: NUMBER
+        
+      - name: delivery_fee_revenue
+        description: Total delivery fees collected
+        expr: SUM(delivery_fee)
+        data_type: NUMBER
+        
+      - name: tip_revenue
+        description: Total tips collected
+        expr: SUM(tip_amount)
+        data_type: NUMBER
+
+  # --------------------------------------------------------------------------
+  # STORES - Location dimension
+  # --------------------------------------------------------------------------
+  - name: stores
+    description: |
+      Pizza store locations with geographic, operational, and proximity data.
+      Includes stadium proximity for game-day forecasting.
+    base_table:
+      database: PIZZA_INTELLIGENCE
+      schema: ANALYTICS
+      table: DIM_STORES
+    
+    dimensions:
+      - name: store_id
+        description: Unique store identifier
+        expr: store_id
+        data_type: VARCHAR
+        unique: true
+        
+      - name: store_name
+        description: Store name/location description
+        expr: store_name
+        data_type: VARCHAR
+        
+      - name: city
+        description: City where the store is located
+        expr: city
+        data_type: VARCHAR
+        sample_values: ['Phoenix', 'Chicago', 'New York', 'Los Angeles', 'Miami']
+        
+      - name: state
+        description: State code
+        expr: state
+        data_type: VARCHAR
+        sample_values: ['AZ', 'IL', 'NY', 'CA', 'FL']
+        
+      - name: region
+        description: Geographic region
+        expr: region
+        data_type: VARCHAR
+        sample_values: ['Southwest', 'Midwest', 'Northeast', 'West', 'Southeast']
+        
+      - name: district
+        description: District/metro area
+        expr: district
+        data_type: VARCHAR
+        
+      - name: store_type
+        description: Store format - dine_in, delivery_only, or hybrid
+        expr: store_type
+        data_type: VARCHAR
+        sample_values: ['dine_in', 'delivery_only', 'hybrid']
+        
+      - name: manager_name
+        description: Store manager name
+        expr: manager_name
+        data_type: VARCHAR
+        
+      - name: nearby_stadium
+        description: Name of nearby stadium for event-based forecasting
+        expr: nearby_stadium
+        data_type: VARCHAR
+        
+      - name: has_drive_thru
+        description: Whether the store has a drive-through
+        expr: has_drive_thru
+        data_type: BOOLEAN
+
+    measures:
+      - name: store_count
+        description: Number of stores
+        expr: COUNT(DISTINCT store_id)
+        data_type: NUMBER
+        
+      - name: avg_stadium_distance
+        description: Average distance to nearby stadium in km
+        expr: AVG(stadium_distance_km)
+        data_type: NUMBER
+
+  # --------------------------------------------------------------------------
+  # PRODUCTS - Menu items
+  # --------------------------------------------------------------------------
+  - name: products
+    description: |
+      Menu items including pizzas, sides, drinks, and desserts.
+      Contains pricing, cost, and nutritional information.
+    base_table:
+      database: PIZZA_INTELLIGENCE
+      schema: ANALYTICS
+      table: DIM_PRODUCTS
+    
+    dimensions:
+      - name: product_id
+        description: Unique product identifier
+        expr: product_id
+        data_type: VARCHAR
+        unique: true
+        
+      - name: product_name
+        description: Name of the menu item
+        expr: product_name
+        data_type: VARCHAR
+        
+      - name: category
+        description: Product category
+        expr: category
+        data_type: VARCHAR
+        sample_values: ['pizza', 'sides', 'drinks', 'desserts']
+        
+      - name: subcategory
+        description: Product subcategory (crust type for pizzas, etc.)
+        expr: subcategory
+        data_type: VARCHAR
+        sample_values: ['thin_crust', 'pan', 'stuffed', 'wings', 'salad', 'soda']
+        synonyms: ['crust type', 'crust']
+        
+      - name: size
+        description: Product size
+        expr: size
+        data_type: VARCHAR
+        sample_values: ['small', 'medium', 'large', 'family']
+        
+      - name: is_signature
+        description: Whether this is a signature/featured item
+        expr: is_signature
+        data_type: BOOLEAN
+        
+      - name: is_seasonal
+        description: Whether this is a seasonal/limited-time item
+        expr: is_seasonal
+        data_type: BOOLEAN
+
+    measures:
+      - name: product_count
+        description: Number of products
+        expr: COUNT(DISTINCT product_id)
+        data_type: NUMBER
+        
+      - name: avg_price
+        description: Average base price
+        expr: AVG(base_price)
+        data_type: NUMBER
+        
+      - name: avg_margin
+        description: Average margin (price - cost)
+        expr: AVG(base_price - cost)
+        data_type: NUMBER
+        
+      - name: avg_margin_percent
+        description: Average margin percentage
+        expr: AVG((base_price - cost) / NULLIF(base_price, 0) * 100)
+        data_type: NUMBER
+
+  # --------------------------------------------------------------------------
+  # DELIVERIES - Delivery performance (pre-joined with store and calendar)
+  # --------------------------------------------------------------------------
+  - name: deliveries
+    description: |
+      Delivery fulfillment data including timing, ratings, and late delivery analysis.
+      Includes store details and calendar info. Use this to understand delivery 
+      performance and identify issues.
+    base_table:
+      database: PIZZA_INTELLIGENCE
+      schema: ANALYTICS
+      table: V_DELIVERIES
+    
+    dimensions:
+      - name: delivery_id
+        description: Unique delivery identifier
+        expr: delivery_id
+        data_type: VARCHAR
+        unique: true
+        
+      - name: delivery_date
+        description: Date of delivery
+        expr: delivery_date
+        data_type: DATE
+        
+      - name: store_id
+        description: Store identifier
+        expr: store_id
+        data_type: VARCHAR
+        
+      - name: store_name
+        description: Name of the store location
+        expr: store_name
+        data_type: VARCHAR
+        
+      - name: city
+        description: City where the store is located
+        expr: city
+        data_type: VARCHAR
+        sample_values: ['Phoenix', 'Chicago', 'New York', 'Los Angeles', 'Miami']
+        
+      - name: region
+        description: Geographic region
+        expr: region
+        data_type: VARCHAR
+        
+      - name: is_late
+        description: Whether the delivery was late (true/false)
+        expr: is_late
+        data_type: BOOLEAN
+        
+      - name: late_reason
+        description: Reason for late delivery if applicable
+        expr: late_reason
+        data_type: VARCHAR
+        sample_values: ['traffic', 'kitchen_delay', 'rider_shortage', 'weather']
+        synonyms: ['delay reason', 'why late']
+        
+      - name: rider_id
+        description: Delivery rider identifier
+        expr: rider_id
+        data_type: VARCHAR
+        
+      - name: is_game_day
+        description: Whether delivery was on a game day
+        expr: is_game_day
+        data_type: BOOLEAN
+        
+      - name: weather_condition
+        description: Weather on delivery date
+        expr: weather_condition
+        data_type: VARCHAR
+
+    measures:
+      - name: total_deliveries
+        description: Total number of deliveries
+        expr: COUNT(DISTINCT delivery_id)
+        data_type: NUMBER
+        
+      - name: late_deliveries
+        description: Number of late deliveries
+        expr: COUNT(DISTINCT CASE WHEN is_late THEN delivery_id END)
+        data_type: NUMBER
+        synonyms: ['delayed deliveries']
+        
+      - name: on_time_deliveries
+        description: Number of on-time deliveries
+        expr: COUNT(DISTINCT CASE WHEN NOT is_late THEN delivery_id END)
+        data_type: NUMBER
+        
+      - name: late_delivery_rate
+        description: Percentage of deliveries that were late
+        expr: COUNT(DISTINCT CASE WHEN is_late THEN delivery_id END) * 100.0 / NULLIF(COUNT(DISTINCT delivery_id), 0)
+        data_type: NUMBER
+        synonyms: ['delay rate', 'late rate']
+        
+      - name: on_time_rate
+        description: Percentage of deliveries that were on time
+        expr: COUNT(DISTINCT CASE WHEN NOT is_late THEN delivery_id END) * 100.0 / NULLIF(COUNT(DISTINCT delivery_id), 0)
+        data_type: NUMBER
+        
+      - name: avg_delivery_time
+        description: Average delivery duration in minutes
+        expr: AVG(delivery_duration_min)
+        data_type: NUMBER
+        
+      - name: avg_late_minutes
+        description: Average minutes late for late deliveries
+        expr: AVG(CASE WHEN is_late THEN late_minutes END)
+        data_type: NUMBER
+        
+      - name: avg_customer_rating
+        description: Average customer rating (1-5 scale)
+        expr: AVG(customer_rating)
+        data_type: NUMBER
+        synonyms: ['delivery rating', 'rating']
+
+  # --------------------------------------------------------------------------
+  # CAMPAIGNS - Marketing campaigns
+  # --------------------------------------------------------------------------
+  - name: campaigns
+    description: |
+      Marketing campaigns and promotions including discounts, bundles, and loyalty programs.
+    base_table:
+      database: PIZZA_INTELLIGENCE
+      schema: ANALYTICS
+      table: DIM_CAMPAIGNS
+    
+    dimensions:
+      - name: campaign_id
+        description: Unique campaign identifier
+        expr: campaign_id
+        data_type: VARCHAR
+        unique: true
+        
+      - name: campaign_name
+        description: Name of the campaign
+        expr: campaign_name
+        data_type: VARCHAR
+        
+      - name: campaign_type
+        description: Type of promotion
+        expr: campaign_type
+        data_type: VARCHAR
+        sample_values: ['discount', 'bogo', 'bundle', 'loyalty']
+        synonyms: ['promo type', 'promotion type']
+        
+      - name: channel
+        description: Marketing channel
+        expr: channel
+        data_type: VARCHAR
+        sample_values: ['app', 'email', 'sms', 'in_store', 'social', 'all']
+        
+      - name: target_segment
+        description: Customer segment targeted
+        expr: target_segment
+        data_type: VARCHAR
+        sample_values: ['new_customers', 'lapsed', 'vip', 'regular', 'all']
+        
+      - name: status
+        description: Campaign status
+        expr: status
+        data_type: VARCHAR
+        sample_values: ['active', 'completed', 'planned', 'paused']
+
+    time_dimensions:
+      - name: start_date
+        description: Campaign start date
+        expr: start_date
+        data_type: DATE
+        
+      - name: end_date
+        description: Campaign end date
+        expr: end_date
+        data_type: DATE
+
+    measures:
+      - name: campaign_count
+        description: Number of campaigns
+        expr: COUNT(DISTINCT campaign_id)
+        data_type: NUMBER
+        
+      - name: total_budget
+        description: Total campaign budget
+        expr: SUM(budget)
+        data_type: NUMBER
+        
+      - name: avg_discount_percent
+        description: Average discount percentage
+        expr: AVG(discount_percent)
+        data_type: NUMBER
+
+  # --------------------------------------------------------------------------
+  # CAMPAIGN PERFORMANCE - Marketing ROI (pre-joined with campaign and store)
+  # --------------------------------------------------------------------------
+  - name: campaign_performance
+    description: |
+      Daily campaign performance metrics including impressions, clicks, redemptions, and ROI.
+      Includes campaign and store details. Use this to evaluate marketing effectiveness.
+    base_table:
+      database: PIZZA_INTELLIGENCE
+      schema: ANALYTICS
+      table: V_CAMPAIGN_PERFORMANCE
+    
+    dimensions:
+      - name: performance_date
+        description: Date of performance metrics
+        expr: performance_date
+        data_type: DATE
+        
+      - name: campaign_id
+        description: Campaign identifier
+        expr: campaign_id
+        data_type: VARCHAR
+        
+      - name: campaign_name
+        description: Name of the campaign
+        expr: campaign_name
+        data_type: VARCHAR
+        
+      - name: campaign_type
+        description: Type of promotion
+        expr: campaign_type
+        data_type: VARCHAR
+        sample_values: ['discount', 'bogo', 'bundle', 'loyalty']
+        
+      - name: channel
+        description: Marketing channel
+        expr: channel
+        data_type: VARCHAR
+        
+      - name: store_id
+        description: Store identifier
+        expr: store_id
+        data_type: VARCHAR
+        
+      - name: store_name
+        description: Name of the store location
+        expr: store_name
+        data_type: VARCHAR
+        
+      - name: city
+        description: City where the store is located
+        expr: city
+        data_type: VARCHAR
+        
+      - name: region
+        description: Geographic region
+        expr: region
+        data_type: VARCHAR
+
+    measures:
+      - name: total_impressions
+        description: Total ad impressions
+        expr: SUM(impressions)
+        data_type: NUMBER
+        
+      - name: total_clicks
+        description: Total clicks on ads/promotions
+        expr: SUM(clicks)
+        data_type: NUMBER
+        
+      - name: click_through_rate
+        description: Click-through rate (clicks / impressions * 100)
+        expr: SUM(clicks) * 100.0 / NULLIF(SUM(impressions), 0)
+        data_type: NUMBER
+        synonyms: ['CTR']
+        
+      - name: total_redemptions
+        description: Total coupon/promo redemptions
+        expr: SUM(redemptions)
+        data_type: NUMBER
+        
+      - name: attributed_orders
+        description: Orders attributed to campaigns
+        expr: SUM(orders_attributed)
+        data_type: NUMBER
+        
+      - name: attributed_revenue
+        description: Revenue attributed to campaigns
+        expr: SUM(revenue_attributed)
+        data_type: NUMBER
+        
+      - name: discount_cost
+        description: Total cost of discounts given
+        expr: SUM(discount_cost)
+        data_type: NUMBER
+        
+      - name: incremental_revenue
+        description: Incremental revenue generated above baseline
+        expr: SUM(incremental_revenue)
+        data_type: NUMBER
+        
+      - name: campaign_roi
+        description: Average return on investment percentage
+        expr: AVG(roi_percent)
+        data_type: NUMBER
+        synonyms: ['ROI', 'return on investment']
+
+  # --------------------------------------------------------------------------
+  # INVENTORY - Stock levels and wastage (pre-joined with store)
+  # --------------------------------------------------------------------------
+  - name: inventory
+    description: |
+      Daily inventory snapshots including stock levels, reorder points, and wastage.
+      Includes store details. Use this to optimize inventory and reduce waste.
+    base_table:
+      database: PIZZA_INTELLIGENCE
+      schema: ANALYTICS
+      table: V_INVENTORY
+    
+    dimensions:
+      - name: snapshot_date
+        description: Date of inventory snapshot
+        expr: snapshot_date
+        data_type: DATE
+        
+      - name: store_id
+        description: Store identifier
+        expr: store_id
+        data_type: VARCHAR
+        
+      - name: store_name
+        description: Name of the store location
+        expr: store_name
+        data_type: VARCHAR
+        
+      - name: city
+        description: City where the store is located
+        expr: city
+        data_type: VARCHAR
+        
+      - name: region
+        description: Geographic region
+        expr: region
+        data_type: VARCHAR
+        
+      - name: ingredient_name
+        description: Name of ingredient/supply item
+        expr: ingredient_name
+        data_type: VARCHAR
+        synonyms: ['ingredient', 'item']
+        
+      - name: ingredient_category
+        description: Category of ingredient
+        expr: ingredient_category
+        data_type: VARCHAR
+        sample_values: ['dough', 'cheese', 'toppings', 'sauces', 'packaging']
+        
+      - name: wastage_reason
+        description: Reason for wastage if any
+        expr: wastage_reason
+        data_type: VARCHAR
+        sample_values: ['expired', 'damaged', 'quality', 'overproduction']
+
+    measures:
+      - name: total_quantity_on_hand
+        description: Total quantity of items in stock
+        expr: SUM(quantity_on_hand)
+        data_type: NUMBER
+        
+      - name: total_wastage
+        description: Total units wasted
+        expr: SUM(wastage_units)
+        data_type: NUMBER
+        synonyms: ['waste', 'wasted']
+        
+      - name: wastage_cost
+        description: Total cost of wasted inventory
+        expr: SUM(wastage_units * unit_cost)
+        data_type: NUMBER
+        
+      - name: inventory_value
+        description: Total value of inventory on hand
+        expr: SUM(quantity_on_hand * unit_cost)
+        data_type: NUMBER
+        
+      - name: items_below_reorder
+        description: Count of items below reorder point
+        expr: COUNT(CASE WHEN quantity_on_hand < reorder_point THEN 1 END)
+        data_type: NUMBER
+
+  # --------------------------------------------------------------------------
+  # STAFFING - Labor and scheduling (pre-joined with store)
+  # --------------------------------------------------------------------------
+  - name: staffing
+    description: |
+      Daily staffing data including scheduled vs actual staff, overtime, and labor costs.
+      Includes store details. Use this for labor planning and cost optimization.
+    base_table:
+      database: PIZZA_INTELLIGENCE
+      schema: ANALYTICS
+      table: V_STAFFING
+    
+    dimensions:
+      - name: shift_date
+        description: Date of the shift
+        expr: shift_date
+        data_type: DATE
+        
+      - name: store_id
+        description: Store identifier
+        expr: store_id
+        data_type: VARCHAR
+        
+      - name: store_name
+        description: Name of the store location
+        expr: store_name
+        data_type: VARCHAR
+        
+      - name: city
+        description: City where the store is located
+        expr: city
+        data_type: VARCHAR
+        
+      - name: region
+        description: Geographic region
+        expr: region
+        data_type: VARCHAR
+        
+      - name: shift_type
+        description: Type of shift
+        expr: shift_type
+        data_type: VARCHAR
+        sample_values: ['morning', 'afternoon', 'evening', 'night']
+        
+      - name: is_game_day
+        description: Whether shift was on a game day
+        expr: is_game_day
+        data_type: BOOLEAN
+
+    measures:
+      - name: total_scheduled_staff
+        description: Total staff scheduled
+        expr: SUM(scheduled_staff)
+        data_type: NUMBER
+        
+      - name: total_actual_staff
+        description: Total staff who actually worked
+        expr: SUM(actual_staff)
+        data_type: NUMBER
+        
+      - name: staff_shortage
+        description: Difference between scheduled and actual staff
+        expr: SUM(scheduled_staff - actual_staff)
+        data_type: NUMBER
+        
+      - name: total_overtime_hours
+        description: Total overtime hours worked
+        expr: SUM(overtime_hours)
+        data_type: NUMBER
+        
+      - name: total_labor_cost
+        description: Total labor cost
+        expr: SUM(labor_cost)
+        data_type: NUMBER
+        
+      - name: total_riders
+        description: Total delivery riders available
+        expr: SUM(riders_available)
+        data_type: NUMBER
+
+  # --------------------------------------------------------------------------
+  # CALENDAR - Time dimension with events
+  # --------------------------------------------------------------------------
+  - name: calendar
+    description: |
+      Calendar dimension with holidays, game days, and weather for forecasting.
+      Use this to understand seasonal patterns and event impacts.
+    base_table:
+      database: PIZZA_INTELLIGENCE
+      schema: ANALYTICS
+      table: DIM_CALENDAR
+    
+    dimensions:
+      - name: date_key
+        description: Calendar date
+        expr: date_key
+        data_type: DATE
+        unique: true
+        
+      - name: day_of_week
+        description: Day name (Monday, Tuesday, etc.)
+        expr: day_of_week
+        data_type: VARCHAR
+        
+      - name: is_weekend
+        description: Whether the date is a weekend
+        expr: is_weekend
+        data_type: BOOLEAN
+        
+      - name: month_name
+        description: Month name
+        expr: month_name
+        data_type: VARCHAR
+        
+      - name: quarter
+        description: Quarter (1-4)
+        expr: quarter
+        data_type: NUMBER
+        
+      - name: year
+        description: Year
+        expr: year
+        data_type: NUMBER
+        
+      - name: is_holiday
+        description: Whether the date is a holiday
+        expr: is_holiday
+        data_type: BOOLEAN
+        
+      - name: holiday_name
+        description: Name of the holiday if applicable
+        expr: holiday_name
+        data_type: VARCHAR
+        
+      - name: is_game_day
+        description: Whether there's a major sports event
+        expr: is_game_day
+        data_type: BOOLEAN
+        synonyms: ['game night', 'sports event']
+        
+      - name: game_event
+        description: Name of the game/event if applicable
+        expr: game_event
+        data_type: VARCHAR
+        sample_values: ['NFL Sunday', 'NFL Playoffs', 'Super Bowl']
+        
+      - name: weather_condition
+        description: Weather condition
+        expr: weather_condition
+        data_type: VARCHAR
+        sample_values: ['sunny', 'rainy', 'hot', 'cold']
+        synonyms: ['weather']
+
+    measures:
+      - name: game_day_count
+        description: Number of game days
+        expr: COUNT(CASE WHEN is_game_day THEN 1 END)
+        data_type: NUMBER
+        
+      - name: avg_high_temp
+        description: Average high temperature
+        expr: AVG(high_temp_f)
+        data_type: NUMBER
+
+  # --------------------------------------------------------------------------
+  # CUSTOMERS - Customer dimension
+  # --------------------------------------------------------------------------
+  - name: customers
+    description: |
+      Customer information including segments, loyalty tiers, and lifetime value.
+    base_table:
+      database: PIZZA_INTELLIGENCE
+      schema: ANALYTICS
+      table: DIM_CUSTOMERS
+    
+    dimensions:
+      - name: customer_id
+        description: Unique customer identifier
+        expr: customer_id
+        data_type: VARCHAR
+        unique: true
+        
+      - name: customer_segment
+        description: Customer segment
+        expr: customer_segment
+        data_type: VARCHAR
+        sample_values: ['new', 'regular', 'vip', 'lapsed']
+        
+      - name: loyalty_tier
+        description: Loyalty program tier
+        expr: loyalty_tier
+        data_type: VARCHAR
+        sample_values: ['bronze', 'silver', 'gold', 'platinum']
+        
+      - name: preferred_channel
+        description: Customer's preferred ordering channel
+        expr: preferred_channel
+        data_type: VARCHAR
+
+    measures:
+      - name: customer_count
+        description: Number of customers
+        expr: COUNT(DISTINCT customer_id)
+        data_type: NUMBER
+        
+      - name: avg_lifetime_value
+        description: Average customer lifetime value
+        expr: AVG(lifetime_value)
+        data_type: NUMBER
+        synonyms: ['LTV', 'CLV']
+        
+      - name: avg_loyalty_points
+        description: Average loyalty points per customer
+        expr: AVG(loyalty_points)
+        data_type: NUMBER
+        
+      - name: total_lifetime_orders
+        description: Total orders across all customers
+        expr: SUM(lifetime_orders)
+        data_type: NUMBER
+
+# ============================================================================
+# VERIFIED QUERIES - Pre-validated queries for common questions
+# ============================================================================
+verified_queries:
+  - name: daily_sales_summary
+    question: What were our sales yesterday?
+    sql: |
+      SELECT 
+        order_date,
+        COUNT(DISTINCT order_id) as total_orders,
+        SUM(total_amount) as total_revenue,
+        AVG(total_amount) as avg_order_value
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS
+      WHERE order_date = CURRENT_DATE() - 1
+      GROUP BY order_date
+    
+  - name: store_performance_comparison
+    question: How are our stores performing this month?
+    sql: |
+      SELECT 
+        s.store_name,
+        s.city,
+        COUNT(DISTINCT o.order_id) as total_orders,
+        SUM(o.total_amount) as total_revenue,
+        AVG(o.total_amount) as avg_order_value
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS o
+      JOIN PIZZA_INTELLIGENCE.ANALYTICS.DIM_STORES s ON o.store_id = s.store_id
+      WHERE o.order_date >= DATE_TRUNC('month', CURRENT_DATE())
+      GROUP BY s.store_name, s.city
+      ORDER BY total_revenue DESC
+    
+  - name: late_delivery_analysis
+    question: What's causing our late deliveries?
+    sql: |
+      SELECT 
+        late_reason,
+        COUNT(*) as late_count,
+        AVG(late_minutes) as avg_minutes_late,
+        COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () as pct_of_late
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_DELIVERIES
+      WHERE is_late = true
+        AND delivery_date >= CURRENT_DATE() - 30
+      GROUP BY late_reason
+      ORDER BY late_count DESC
+    
+  - name: game_day_impact
+    question: How do game days affect our sales?
+    sql: |
+      SELECT 
+        c.is_game_day,
+        CASE WHEN c.is_game_day THEN 'Game Day' ELSE 'Regular Day' END as day_type,
+        COUNT(DISTINCT o.order_id) as total_orders,
+        SUM(o.total_amount) as total_revenue,
+        AVG(o.total_amount) as avg_order_value
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS o
+      JOIN PIZZA_INTELLIGENCE.ANALYTICS.DIM_CALENDAR c ON o.order_date = c.date_key
+      WHERE o.order_date >= CURRENT_DATE() - 90
+      GROUP BY c.is_game_day
+      ORDER BY is_game_day DESC
+    
+  - name: campaign_roi_summary
+    question: Which campaigns have the best ROI?
+    sql: |
+      SELECT 
+        c.campaign_name,
+        c.campaign_type,
+        SUM(cp.revenue_attributed) as total_revenue,
+        SUM(cp.discount_cost) as total_cost,
+        SUM(cp.incremental_revenue) as incremental_revenue,
+        AVG(cp.roi_percent) as avg_roi
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_CAMPAIGN_PERFORMANCE cp
+      JOIN PIZZA_INTELLIGENCE.ANALYTICS.DIM_CAMPAIGNS c ON cp.campaign_id = c.campaign_id
+      WHERE cp.performance_date >= CURRENT_DATE() - 30
+      GROUP BY c.campaign_name, c.campaign_type
+      ORDER BY avg_roi DESC
+    
+  - name: inventory_wastage
+    question: How much inventory are we wasting?
+    sql: |
+      SELECT 
+        ingredient_category,
+        ingredient_name,
+        SUM(wastage_units) as total_wasted,
+        SUM(wastage_units * unit_cost) as wastage_cost
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_INVENTORY
+      WHERE snapshot_date >= CURRENT_DATE() - 30
+        AND wastage_units > 0
+      GROUP BY ingredient_category, ingredient_name
+      ORDER BY wastage_cost DESC
+      LIMIT 10
+
