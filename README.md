@@ -115,11 +115,11 @@ streamlit run pizza_ops_assistant.py
 
 | # | Question | What It Demonstrates |
 |---|----------|---------------------|
-| 1 | **"Across all stores last Friday, which cities saw the biggest gap between order demand and kitchen capacity, and why?"** | Multi-table joins across orders, capacity, delays, and events |
-| 2 | **"Show me stores where delivery time has been worsening over the last 4 Fridays but revenue hasn't dropped yet. What's driving the delay risk?"** | Leading indicator analysis, trend detection across time |
-| 3 | **"Compare thin-crust vs pan-pizza performance across channels (app vs in-store vs aggregators) over the last 8 weeks and explain the main trends."** | Product mix analysis by channel with trend explanation |
-| 4 | **"Using order history, weather, and local events, which 10 stores are most at risk of stock-outs this coming Friday, and what should their target dough prep be?"** | Predictive analytics combining multiple data sources |
-| 5 | **"For our top 50 stores by revenue, summarize the most common complaint themes in reviews from the past month and map them to operational issues (delivery, quality, pricing)."** | Cortex Search + Analyst combining structured and unstructured data |
+| 1 | **"Show me the capacity gap by city for last Friday"** | Multi-table joins (orders + kitchen capacity + stores), cross-city comparison |
+| 2 | **"Which stores had the highest late delivery rates last Friday and what were the main causes?"** | Delivery performance metrics, root cause analysis, store-level comparison |
+| 3 | **"Compare thin-crust vs pan-pizza performance across channels over the last 8 weeks"** | Product mix analysis by channel with trend explanation |
+| 4 | **"How much revenue are we losing across all stores with kitchen capacity issues?"** | Financial impact quantification, capacity-to-revenue correlation |
+| 5 | **"Which stores are in crisis mode right now and what's causing it?"** | Combined crisis analysis (capacity + delivery), multi-tool orchestration |
 
 ### For Store Managers using the Streamlit App
 *(Front-line users of your "Manager's Co-Pilot")*
@@ -178,23 +178,27 @@ streamlit run pizza_ops_assistant.py
 
 ---
 
-## Key Demo Story: Chicago Thin-Crust Decline
+## Key Demo Story: Multi-City Capacity Crisis
 
-The demo is built around a compelling root cause analysis scenario:
+The demo is built around a compelling multi-city operations crisis:
 
-**The Question:** "Why did thin-crust sales dip in Chicago?"
+**The Question:** "Which stores are in crisis mode and what's causing it?"
 
 **The Answer (discovered through AI):**
 
-| Store | Thin-Crust Share | Kitchen Capacity | Ovens Working | Root Cause |
-|-------|------------------|------------------|---------------|------------|
-| Chicago Loop | 22.8% | 45% | 2 of 4 | Oven 2 repair pending, Oven 3 temperature calibration |
-| Chicago Wrigleyville | 42.9% | 93% | 4 of 4 | No issues |
+| City | Store | Kitchen Capacity | Late Delivery % | Crisis Level | Root Cause |
+|------|-------|------------------|-----------------|--------------|------------|
+| Chicago | Chicago Loop | 45% | 44.0% | CRITICAL | Oven repair pending, temperature calibration |
+| Los Angeles | LA Downtown | 55% | 66.7% | CRITICAL | Exhaust fan failure - ovens offline |
+| New York | Manhattan Midtown | 62% | 48.0% | CRITICAL | Gas line issue - awaiting repair |
+| Miami | Miami Beach | 70% | 52.0% | CRITICAL | Electrical panel upgrade in progress |
+
+**Revenue Impact:** Over $15,000/month in lost revenue across 4 cities
 
 **Supporting Evidence:**
-- Cortex Analyst shows capacity constraints in structured data
-- Cortex Search finds audit reports mentioning "Oven 2 temperature inconsistent"
-- Customer reviews mention "thin crust soggy" and "switching to Crispy Crust Co."
+- Cortex Analyst shows capacity constraints and delivery delays in structured data
+- Cortex Search finds maintenance reports detailing equipment failures
+- Customer reviews mention delivery delays and quality issues
 
 ---
 
