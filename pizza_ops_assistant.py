@@ -140,6 +140,9 @@ def generate_manager_insights(question: str, data_summary: str, store_name: str)
     Use Cortex LLM to generate actionable recommendations for store managers
     based on the data retrieved by Cortex Analyst.
     """
+    if not data_summary:
+        return None
+        
     conn = get_snowflake_connection()
     
     prompt = f"""You are a helpful assistant for a pizza store manager at {store_name}.
@@ -161,19 +164,24 @@ Provide your response in this format:
 
 Keep it brief and actionable. No more than 100 words total."""
 
+    # Escape single quotes for SQL
+    escaped_prompt = prompt.replace("'", "''").replace("\\", "\\\\")
+    
     try:
-        result = conn.session().sql(f"""
+        sql = f"""
             SELECT SNOWFLAKE.CORTEX.COMPLETE(
-                'mistral-large2',
-                '{prompt.replace("'", "''")}'
+                'claude-3-5-sonnet',
+                '{escaped_prompt}'
             ) as response
-        """).collect()
+        """
+        result = conn.session().sql(sql).collect()
         
         if result and len(result) > 0:
             return result[0]['RESPONSE']
         return None
     except Exception as e:
-        # Silently fail - insights are optional enhancement
+        # Log error for debugging but don't break the app
+        st.warning(f"Could not generate recommendations: {e}")
         return None
 
 
@@ -641,6 +649,12 @@ def process_user_question(question: str, force_type: Optional[str] = None):
                                 st.divider()
                                 st.markdown("### 💡 Manager Recommendations")
                                 st.markdown(insights)
+                            else:
+                                st.info("Could not generate recommendations for this query.")
+                    else:
+                        # Debug: show why no recommendations
+                        if sql_statement:
+                            st.caption("No data returned from query - cannot generate recommendations.")
                     
                     # Store assistant response
                     st.session_state.messages.append({
