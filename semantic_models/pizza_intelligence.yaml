@@ -210,9 +210,11 @@ tables:
         unique: true
         
       - name: store_name
-        description: Store name/location description
+        description: Name of the store location (e.g., Chicago Loop, LA Downtown, Manhattan Midtown). Use this to filter by specific store.
         expr: store_name
         data_type: VARCHAR
+        sample_values: ['Chicago Loop', 'LA Downtown', 'Manhattan Midtown', 'Miami Beach', 'Downtown Phoenix', 'Naperville', 'Chicago Wrigleyville']
+        synonyms: ['store', 'location', 'branch']
         
       - name: city
         description: City where the store is located
@@ -339,6 +341,9 @@ tables:
       Delivery fulfillment data including timing, ratings, and late delivery analysis.
       Includes store details and calendar info. Use this to understand delivery 
       performance and identify issues.
+      
+      IMPORTANT: When filtering by store like "Chicago Loop" or "LA Downtown", 
+      use store_name (not city). City "Chicago" contains multiple stores.
     base_table:
       database: PIZZA_INTELLIGENCE
       schema: ANALYTICS
@@ -362,12 +367,16 @@ tables:
         data_type: VARCHAR
         
       - name: store_name
-        description: Name of the store location
+        description: |
+          Name of the store location. Use this to filter by specific store.
+          IMPORTANT: "Chicago Loop" is a store_name, not a city. Use store_name='Chicago Loop'.
         expr: store_name
         data_type: VARCHAR
+        sample_values: ['Chicago Loop', 'LA Downtown', 'Manhattan Midtown', 'Miami Beach', 'Downtown Phoenix', 'Naperville']
+        synonyms: ['store', 'location', 'branch']
         
       - name: city
-        description: City where the store is located
+        description: City where the store is located. Note that cities may have multiple stores.
         expr: city
         data_type: VARCHAR
         sample_values: ['Phoenix', 'Chicago', 'New York', 'Los Angeles', 'Miami']
@@ -1193,6 +1202,37 @@ tables:
 # VERIFIED QUERIES - Pre-validated queries for common questions
 # ============================================================================
 verified_queries:
+  - name: store_delivery_performance
+    question: Show me delivery performance for a specific store like Chicago Loop
+    sql: |
+      SELECT 
+        store_name,
+        delivery_date,
+        COUNT(*) as total_deliveries,
+        SUM(CASE WHEN is_late THEN 1 ELSE 0 END) as late_deliveries,
+        ROUND(SUM(CASE WHEN is_late THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) as late_pct,
+        ROUND(AVG(delivery_duration_min), 1) as avg_duration_min
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
+      WHERE store_name = 'Chicago Loop'  -- Use store_name not city
+        AND delivery_date >= CURRENT_DATE() - 7
+      GROUP BY store_name, delivery_date
+      ORDER BY delivery_date DESC
+
+  - name: store_late_reasons
+    question: What's causing late deliveries at a specific store?
+    sql: |
+      SELECT 
+        store_name,
+        late_reason,
+        COUNT(*) as late_count,
+        ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) as pct_of_late
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
+      WHERE store_name = 'Chicago Loop'  -- Filter by store_name
+        AND is_late = TRUE
+        AND delivery_date >= CURRENT_DATE() - 7
+      GROUP BY store_name, late_reason
+      ORDER BY late_count DESC
+
   - name: thin_crust_vs_pan_performance
     question: Compare thin-crust vs pan-pizza sales performance
     sql: |
