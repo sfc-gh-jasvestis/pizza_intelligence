@@ -25,21 +25,6 @@ description: |
   store_id and date (capacity_date = order_date).
 
 # ============================================================================
-# SAMPLE QUESTIONS - Shown as suggestions in Snowflake Intelligence
-# ============================================================================
-sample_questions:
-  - "Across all stores last Friday, which cities saw the biggest gap between order demand and kitchen capacity, and why?"
-  - "Which stores had the highest late delivery rates last Friday and what were the main causes?"
-  - "Compare thin-crust vs pan-pizza performance across channels (app vs in-store vs third-party) over the last 8 weeks"
-  - "Based on historical Friday patterns, which stores should prepare extra inventory this week?"
-  - "Summarize customer complaint themes from recent reviews and map them to operational issues"
-  - "Why did thin-crust sales dip in Chicago?"
-  - "What are the top performing stores by revenue this month?"
-  - "Which campaigns have the best ROI?"
-  - "Show me stores with kitchen capacity issues"
-  - "What were our total sales last week by city?"
-
-# ============================================================================
 # TABLES
 # ============================================================================
 tables:
@@ -1442,28 +1427,42 @@ verified_queries:
       city_capacity AS (
         SELECT 
           kc.city,
-          AVG(kc.max_pizzas_per_hour) as avg_max_capacity,
-          AVG(kc.actual_pizzas_made) as avg_actual_production,
-          AVG(kc.thin_crust_capacity_pct) as avg_thin_crust_capacity,
+          MIN(kc.thin_crust_capacity_pct) as min_thin_crust_capacity,
           AVG(kc.ovens_operational) as avg_ovens_working,
+          AVG(kc.total_ovens) as total_ovens,
           LISTAGG(DISTINCT kc.downtime_reason, '; ') as capacity_issues
         FROM PIZZA_INTELLIGENCE.ANALYTICS.V_KITCHEN_CAPACITY kc
         WHERE kc.capacity_date = (SELECT last_friday FROM friday_date)
-          AND kc.downtime_reason IS NOT NULL
         GROUP BY kc.city
       )
       SELECT 
         co.city,
         co.total_orders as order_demand,
-        co.total_revenue,
-        COALESCE(cc.avg_max_capacity, 80) as avg_max_capacity_per_hour,
-        COALESCE(cc.avg_actual_production, 80) as avg_actual_production,
-        COALESCE(cc.avg_thin_crust_capacity, 100) as thin_crust_capacity_pct,
-        COALESCE(cc.avg_ovens_working, 4) as avg_ovens_working,
+        ROUND(co.total_revenue, 0) as total_revenue,
+        cc.min_thin_crust_capacity as thin_crust_capacity_pct,
+        ROUND(cc.avg_ovens_working, 0) as ovens_working,
+        ROUND(cc.total_ovens, 0) as total_ovens,
         cc.capacity_issues as why_capacity_constrained
       FROM city_orders co
       LEFT JOIN city_capacity cc ON co.city = cc.city
-      ORDER BY COALESCE(cc.avg_thin_crust_capacity, 100) ASC
+      ORDER BY cc.min_thin_crust_capacity ASC NULLS LAST
+
+  - name: capacity_gap_by_city
+    question: Show me the capacity gap by city for last Friday
+    sql: |
+      WITH friday_date AS (
+        SELECT DATEADD(day, -MOD(DAYOFWEEK(CURRENT_DATE()) + 2, 7), CURRENT_DATE()) as last_friday
+      )
+      SELECT 
+        kc.city,
+        MIN(kc.thin_crust_capacity_pct) as thin_crust_capacity_pct,
+        ROUND(AVG(kc.ovens_operational), 0) as ovens_working,
+        ROUND(AVG(kc.total_ovens), 0) as total_ovens,
+        LISTAGG(DISTINCT kc.downtime_reason, '; ') WITHIN GROUP (ORDER BY kc.downtime_reason) as equipment_issues
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.V_KITCHEN_CAPACITY kc
+      WHERE kc.capacity_date = (SELECT last_friday FROM friday_date)
+      GROUP BY kc.city
+      ORDER BY thin_crust_capacity_pct ASC NULLS LAST
 
   - name: delivery_trend_vs_revenue
     question: Show me stores where delivery time has been worsening over the last 4 Fridays but revenue hasn't dropped yet
@@ -1562,34 +1561,66 @@ verified_queries:
           s.store_name,
           s.city,
           AVG(o.item_count) as avg_items_per_order,
-          COUNT(*) as avg_friday_orders,
-          SUM(o.total_amount) as avg_friday_revenue
+          COUNT(*) as friday_orders,
+          SUM(o.total_amount) as friday_revenue
         FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS o
         JOIN PIZZA_INTELLIGENCE.ANALYTICS.DIM_STORES s ON o.store_id = s.store_id
         WHERE DAYNAME(o.order_date) = 'Fri'
           AND o.order_date >= CURRENT_DATE() - 28
         GROUP BY o.store_id, s.store_name, s.city
-      ),
-      inventory_status AS (
-        SELECT 
-          store_id,
-          AVG(CASE WHEN ingredient_name LIKE '%dough%' THEN current_stock END) as avg_dough_stock,
-          AVG(CASE WHEN ingredient_name LIKE '%pepperoni%' THEN current_stock END) as avg_pepperoni_stock
-        FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_INVENTORY
-        WHERE snapshot_date >= CURRENT_DATE() - 7
-        GROUP BY store_id
       )
       SELECT 
-        fo.store_name,
-        fo.city,
-        fo.avg_friday_orders as typical_friday_orders,
-        ROUND(fo.avg_friday_revenue, 0) as typical_friday_revenue,
-        fo.avg_items_per_order,
-        'High demand store - ensure extra dough and pepperoni prep' as recommendation
-      FROM friday_orders fo
-      LEFT JOIN inventory_status inv ON fo.store_id = inv.store_id
-      ORDER BY fo.avg_friday_revenue DESC
+        store_name,
+        city,
+        friday_orders as typical_friday_orders,
+        ROUND(friday_revenue, 0) as typical_friday_revenue,
+        ROUND(avg_items_per_order, 1) as avg_items_per_order,
+        ROUND(friday_orders * avg_items_per_order * 1.2, 0) as recommended_prep_units,
+        CASE 
+          WHEN friday_orders > 100 THEN 'HIGH PRIORITY - Major Friday volume, prep 20% extra'
+          WHEN friday_orders > 50 THEN 'MEDIUM - Standard Friday prep with buffer'
+          ELSE 'NORMAL - Standard prep levels'
+        END as prep_recommendation
+      FROM friday_orders
+      ORDER BY friday_revenue DESC
       LIMIT 10
+
+  - name: chicago_revenue_at_risk
+    question: How much revenue is Chicago losing due to kitchen capacity issues?
+    sql: |
+      WITH chicago_metrics AS (
+        SELECT 
+          s.store_name,
+          COUNT(DISTINCT o.order_id) as total_orders,
+          ROUND(SUM(o.total_amount), 0) as total_revenue,
+          ROUND(AVG(o.total_amount), 2) as avg_order_value
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS o
+        JOIN PIZZA_INTELLIGENCE.ANALYTICS.DIM_STORES s ON o.store_id = s.store_id
+        WHERE s.city = 'Chicago'
+          AND o.order_date >= CURRENT_DATE() - 30
+        GROUP BY s.store_name
+      ),
+      capacity_issues AS (
+        SELECT 
+          store_name,
+          MIN(thin_crust_capacity_pct) as min_thin_crust_pct,
+          AVG(ovens_operational) as avg_ovens,
+          LISTAGG(DISTINCT downtime_reason, '; ') as equipment_issues
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_KITCHEN_CAPACITY
+        WHERE city = 'Chicago'
+          AND capacity_date >= CURRENT_DATE() - 7
+        GROUP BY store_name
+      )
+      SELECT 
+        cm.store_name,
+        cm.total_orders,
+        cm.total_revenue as current_revenue,
+        ci.min_thin_crust_pct as capacity_pct,
+        ROUND(cm.total_revenue * (100 - ci.min_thin_crust_pct) / 100 * 0.3, 0) as estimated_lost_revenue,
+        ci.equipment_issues as why
+      FROM chicago_metrics cm
+      JOIN capacity_issues ci ON cm.store_name = ci.store_name
+      ORDER BY estimated_lost_revenue DESC
 
   - name: complaint_themes_summary
     question: Summarize customer complaint themes from recent reviews and map them to operational issues
