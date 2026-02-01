@@ -76,13 +76,14 @@ Which stores had the highest late delivery rates last Friday and what were the m
 
 **Expected Response:**
 Agent should identify stores with WILDLY varying late rates:
-- **LA Downtown: 42.7% late rate** (Driver shortage + kitchen overflow)
-- **Miami Beach: 33.6% late rate** (Traffic + weather)
-- **Chicago Loop: 30.5% late rate** (Kitchen delays from equipment issues)
-- **Manhattan Midtown: 28.2% late rate** (Peak hour congestion)
+- **LA Downtown: 66.7% late rate** (Heavy traffic - rush hour gridlock)
+- **Miami Beach: 52.0% late rate** (Beach traffic - tourist season)
+- **Manhattan Midtown: 48.0% late rate** (Midtown traffic congestion)
+- **Chicago Loop: 44.0% late rate** (Extended prep time - equipment issues)
+- **Naperville: 35.0% late rate** (Suburban traffic)
 
 **Talking Point:**
-> "Look at that spread - LA is losing nearly HALF their deliveries to late arrivals while other stores run at 15-20%. This is a crisis that's costing us customer loyalty."
+> "Look at that spread - LA is losing TWO-THIRDS of their deliveries to late arrivals! And notice Chicago Loop - their late deliveries are caused by EQUIPMENT issues, not traffic. This connects directly to our capacity crisis."
 
 ---
 
