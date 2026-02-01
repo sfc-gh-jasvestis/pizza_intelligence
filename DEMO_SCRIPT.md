@@ -51,13 +51,15 @@ Show me the capacity gap by city for last Friday
 - Equipment issue identification
 
 **Expected Response:**
-Agent should show Chicago at **45% thin-crust capacity** while all other cities are at 85-98%:
-- Chicago: 45% capacity, 3 ovens working (out of 4)
-- Equipment issues: "Oven 2 repair pending, Oven 3 temperature calibration issues"
-- All other cities: 85-98% capacity, 4 ovens operational
+Agent should show **FOUR cities in crisis** with varying severity:
+- **Chicago: 45% capacity** - Oven 2 repair pending, temperature calibration issues
+- **Los Angeles: 55% capacity** - CRITICAL exhaust fan failure
+- **New York: 62% capacity** - Gas line maintenance 
+- **Miami: 70% capacity** - Electrical upgrade in progress
+- All other cities: 85-98% capacity, fully operational
 
 **Talking Point:**
-> "Notice the dramatic gap - Chicago is operating at HALF capacity while everywhere else runs smoothly. This isn't just data, it's an urgent operational alert."
+> "Notice the multi-city crisis - this isn't just one store, it's a SYSTEMIC equipment problem across our biggest markets. Chicago at 45%, LA at 55% - that's nearly half our production capacity in our top revenue cities."
 
 ---
 
@@ -70,17 +72,17 @@ Which stores had the highest late delivery rates last Friday and what were the m
 **What It Demonstrates:**
 - Delivery performance metrics
 - Root cause analysis
-- Store-level comparison
+- Store-level comparison with dramatic variance
 
 **Expected Response:**
-Agent should identify:
-- Scottsdale North: 16.7% late rate (highest)
-- Santa Monica: 11.1% late rate  
-- Naperville: 10.5% late rate
-- Main cause: Traffic across all locations
+Agent should identify stores with WILDLY varying late rates:
+- **LA Downtown: 42.7% late rate** (Driver shortage + kitchen overflow)
+- **Miami Beach: 33.6% late rate** (Traffic + weather)
+- **Chicago Loop: 30.5% late rate** (Kitchen delays from equipment issues)
+- **Manhattan Midtown: 28.2% late rate** (Peak hour congestion)
 
 **Talking Point:**
-> "The agent doesn't just show WHICH stores have problems - it tells you WHY. Traffic is the common thread, which points to route optimization opportunities."
+> "Look at that spread - LA is losing nearly HALF their deliveries to late arrivals while other stores run at 15-20%. This is a crisis that's costing us customer loyalty."
 
 ---
 
@@ -109,45 +111,47 @@ Agent should show:
 ## Question 4: Revenue at Risk Analysis 🔥🔥🔥
 
 ```
-How much revenue is Chicago losing due to kitchen capacity issues?
+How much revenue are we losing across all stores with kitchen capacity issues?
 ```
 
 **What It Demonstrates:**
-- Financial impact quantification
+- Financial impact across ALL problem cities
 - Capacity-to-revenue correlation
-- Urgency for equipment repair
+- Urgency for equipment investment
 
 **Expected Response:**
-Agent should calculate:
-- Chicago Loop: **$11,000+ estimated lost revenue** from oven issues
-- 45% capacity = 55% production lost
-- Direct link to equipment problems
+Agent should calculate revenue at risk for EACH city:
+- **Chicago Loop: ~$11,000 estimated lost revenue** (45% capacity)
+- **LA Downtown: ~$8,500 estimated lost revenue** (55% capacity)  
+- **Manhattan: ~$6,200 estimated lost revenue** (62% capacity)
+- **Miami Beach: ~$4,800 estimated lost revenue** (70% capacity)
+- **Total at risk: $30,000+ monthly**
 
 **Talking Point:**
-> "This is the CFO question - 'What's it costing us?' Now we have a number: $11K per month. That's the business case for emergency oven repair."
+> "This is the CFO question - 'What's it costing us?' Now we have a number: Over $30K per month in lost revenue across four cities. That's the business case for emergency equipment investment."
 
 ---
 
-## Question 5: Complaint Themes + Operations Fusion 🔥🔥
+## Question 5: Crisis Mode Dashboard 🔥🔥🔥
 
 ```
-Summarize customer complaint themes from recent reviews and map them to operational issues
+Which stores are in crisis mode right now and what's causing it?
 ```
 
 **What It Demonstrates:**
-- **Cortex Search** for unstructured documents (reviews, feedback)
-- **Cortex Analyst** for structured metrics
-- Multi-tool orchestration
+- **Combined crisis analysis** - both capacity AND delivery problems
+- Multi-tool orchestration  
+- Severity ranking for prioritization
 
 **Expected Response:**
-Agent should:
-- Search customer reviews and feedback documents
-- Identify complaint themes (delivery delays, quality, pricing)
-- Map to operational metrics (late rates, capacity issues)
-- Highlight Chicago equipment issues and competitor mentions
+Agent should show stores ranked by crisis severity:
+- **CRITICAL**: Chicago Loop (45% capacity + 30.5% late delivery)
+- **CRITICAL**: LA Downtown (55% capacity + 42.7% late delivery)
+- **HIGH**: Miami Beach (70% capacity + 33.6% late delivery)
+- **HIGH**: Manhattan Midtown (62% capacity + 28.2% late delivery)
 
 **Talking Point:**
-> "This is the magic - the agent queried structured delivery data AND searched through unstructured customer reviews to connect operations with sentiment. No dashboard can do this."
+> "This is the ops command center view - stores with BOTH capacity AND delivery problems get flagged CRITICAL. Chicago and LA need immediate attention because they're failing on both fronts."
 
 ---
 
@@ -158,8 +162,8 @@ Add these 5 questions as "Suggested Questions" in the Pizza Ops Agent settings:
 1. Show me the capacity gap by city for last Friday
 2. Which stores had the highest late delivery rates last Friday and what were the main causes?
 3. Compare thin-crust vs pan-pizza performance across channels over the last 8 weeks
-4. How much revenue is Chicago losing due to kitchen capacity issues?
-5. Summarize customer complaint themes from recent reviews and map them to operational issues
+4. How much revenue are we losing across all stores with kitchen capacity issues?
+5. Which stores are in crisis mode right now and what's causing it?
 
 ---
 
