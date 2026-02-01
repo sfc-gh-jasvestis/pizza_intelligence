@@ -10,9 +10,34 @@ name: pizza_intelligence
 description: |
   QSR Master Schema for Pizza Intelligence - enabling natural language queries 
   over pizza operations data including orders, deliveries, inventory, staffing, 
-  and campaign performance. This semantic model powers the Pizza Time Machine 
-  Kitchen, turning scattered data into actionable intelligence about past 
-  performance, current operations, and future predictions.
+  kitchen capacity, and campaign performance. This semantic model powers the 
+  Pizza Time Machine Kitchen.
+  
+  KEY TABLES FOR CAPACITY ANALYSIS:
+  - kitchen_capacity: Contains max_pizzas_per_hour, actual_pizzas_made, 
+    thin_crust_capacity_pct, ovens_operational, and downtime_reason.
+    Use this table for questions about production capacity, oven status,
+    capacity gaps, and why certain products may be underperforming.
+  - orders: Transaction data with order volumes by store and date.
+  - order_items: Product-level data including crust_type (thin_crust, pan, stuffed).
+  
+  To analyze demand vs capacity gaps, JOIN kitchen_capacity with orders on 
+  store_id and date (capacity_date = order_date).
+
+# ============================================================================
+# SAMPLE QUESTIONS - Shown as suggestions in Snowflake Intelligence
+# ============================================================================
+sample_questions:
+  - "Across all stores last Friday, which cities saw the biggest gap between order demand and kitchen capacity, and why?"
+  - "Which stores had the highest late delivery rates last Friday and what were the main causes?"
+  - "Compare thin-crust vs pan-pizza performance across channels (app vs in-store vs third-party) over the last 8 weeks"
+  - "Based on historical Friday patterns, which stores should prepare extra inventory this week?"
+  - "Summarize customer complaint themes from recent reviews and map them to operational issues"
+  - "Why did thin-crust sales dip in Chicago?"
+  - "What are the top performing stores by revenue this month?"
+  - "Which campaigns have the best ROI?"
+  - "Show me stores with kitchen capacity issues"
+  - "What were our total sales last week by city?"
 
 # ============================================================================
 # TABLES
@@ -888,13 +913,29 @@ tables:
 
   # --------------------------------------------------------------------------
   # KITCHEN CAPACITY - Oven and production capacity tracking
+  # CRITICAL: Use this table for capacity analysis and demand-capacity gaps
   # --------------------------------------------------------------------------
   - name: kitchen_capacity
     description: |
-      Kitchen capacity and oven status tracking. Use this table to understand 
-      production constraints, oven downtime, and capacity issues that may affect
-      product availability. CRITICAL for understanding why certain pizza types 
-      (especially thin-crust) may have reduced sales.
+      Kitchen capacity and oven status tracking. CRITICAL TABLE for understanding 
+      production constraints, oven downtime, and capacity issues that affect sales.
+      
+      USE THIS TABLE WHEN ASKED ABOUT:
+      - Kitchen capacity, production capacity, or capacity gaps
+      - Oven status, oven issues, or equipment problems  
+      - Why thin-crust or other product sales may be reduced
+      - Demand vs capacity analysis
+      - Store operational constraints
+      
+      KEY MEASURES:
+      - max_pizzas_per_hour: Maximum production capacity per hour
+      - actual_pizzas_made: Actual pizzas produced
+      - thin_crust_capacity_pct: Percentage of thin-crust production available (100% = full capacity)
+      - ovens_operational: Number of working ovens (vs total_ovens)
+      - downtime_reason: Text explanation of any oven/equipment issues
+      
+      JOIN WITH orders table on store_id and capacity_date = order_date to compare
+      demand (order volume) against capacity (max_pizzas_per_hour).
     base_table:
       database: PIZZA_INTELLIGENCE
       schema: ANALYTICS
@@ -987,35 +1028,37 @@ tables:
         synonyms: ['downtime', 'oven downtime']
         
       - name: max_pizzas_per_hour
-        description: Maximum pizza production capacity per hour
+        description: Maximum pizza production capacity per hour. Compare with actual_pizzas_made to identify capacity gaps.
         expr: max_pizzas_per_hour
         data_type: NUMBER
-        default_aggregation: sum
+        default_aggregation: avg
+        synonyms: ['production capacity', 'kitchen capacity', 'max capacity']
         
       - name: actual_pizzas_made
-        description: Actual pizzas produced
+        description: Actual pizzas produced. Compare with max_pizzas_per_hour to calculate capacity utilization.
         expr: actual_pizzas_made
         data_type: NUMBER
-        default_aggregation: sum
+        default_aggregation: avg
+        synonyms: ['pizzas made', 'production volume']
         
       - name: thin_crust_capacity_pct
-        description: Percentage of capacity available for thin-crust pizzas
+        description: Percentage of capacity available for thin-crust pizzas. 100% means full capacity, lower values indicate production constraints.
         expr: thin_crust_capacity_pct
         data_type: NUMBER
-        default_aggregation: sum
-        synonyms: ['thin crust capacity', 'thin-crust availability']
+        default_aggregation: avg
+        synonyms: ['thin crust capacity', 'thin-crust availability', 'thin crust production capacity']
         
       - name: pan_capacity_pct
         description: Percentage of capacity available for pan pizzas
         expr: pan_capacity_pct
         data_type: NUMBER
-        default_aggregation: sum
+        default_aggregation: avg
         
       - name: stuffed_capacity_pct
         description: Percentage of capacity available for stuffed crust pizzas
         expr: stuffed_capacity_pct
         data_type: NUMBER
-        default_aggregation: sum
+        default_aggregation: avg
         
       - name: kitchen_temp_f
         description: Kitchen/oven temperature in Fahrenheit
@@ -1379,4 +1422,226 @@ verified_queries:
       FROM orders_by_store obs
       LEFT JOIN capacity_by_store cbs ON obs.store_id = cbs.store_id
       ORDER BY cbs.avg_thin_capacity ASC NULLS LAST
+
+  - name: city_capacity_gap_last_friday
+    question: Across all stores last Friday, which cities saw the biggest gap between order demand and kitchen capacity, and why?
+    sql: |
+      WITH friday_date AS (
+        SELECT DATEADD(day, -MOD(DAYOFWEEK(CURRENT_DATE()) + 2, 7), CURRENT_DATE()) as last_friday
+      ),
+      city_orders AS (
+        SELECT 
+          s.city,
+          COUNT(DISTINCT o.order_id) as total_orders,
+          SUM(o.total_amount) as total_revenue
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS o
+        JOIN PIZZA_INTELLIGENCE.ANALYTICS.DIM_STORES s ON o.store_id = s.store_id
+        WHERE o.order_date = (SELECT last_friday FROM friday_date)
+        GROUP BY s.city
+      ),
+      city_capacity AS (
+        SELECT 
+          kc.city,
+          AVG(kc.max_pizzas_per_hour) as avg_max_capacity,
+          AVG(kc.actual_pizzas_made) as avg_actual_production,
+          AVG(kc.thin_crust_capacity_pct) as avg_thin_crust_capacity,
+          AVG(kc.ovens_operational) as avg_ovens_working,
+          LISTAGG(DISTINCT kc.downtime_reason, '; ') as capacity_issues
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_KITCHEN_CAPACITY kc
+        WHERE kc.capacity_date = (SELECT last_friday FROM friday_date)
+          AND kc.downtime_reason IS NOT NULL
+        GROUP BY kc.city
+      )
+      SELECT 
+        co.city,
+        co.total_orders as order_demand,
+        co.total_revenue,
+        COALESCE(cc.avg_max_capacity, 80) as avg_max_capacity_per_hour,
+        COALESCE(cc.avg_actual_production, 80) as avg_actual_production,
+        COALESCE(cc.avg_thin_crust_capacity, 100) as thin_crust_capacity_pct,
+        COALESCE(cc.avg_ovens_working, 4) as avg_ovens_working,
+        cc.capacity_issues as why_capacity_constrained
+      FROM city_orders co
+      LEFT JOIN city_capacity cc ON co.city = cc.city
+      ORDER BY COALESCE(cc.avg_thin_crust_capacity, 100) ASC
+
+  - name: delivery_trend_vs_revenue
+    question: Show me stores where delivery time has been worsening over the last 4 Fridays but revenue hasn't dropped yet
+    sql: |
+      WITH fridays AS (
+        SELECT DISTINCT order_date as friday_date
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS
+        WHERE DAYNAME(order_date) = 'Fri'
+          AND order_date >= CURRENT_DATE() - 28
+        ORDER BY order_date DESC
+        LIMIT 4
+      ),
+      delivery_by_week AS (
+        SELECT 
+          d.store_id,
+          s.store_name,
+          s.city,
+          d.delivery_date,
+          AVG(d.delivery_duration_min) as avg_delivery_time,
+          SUM(CASE WHEN d.is_late THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as late_pct,
+          SUM(o.total_amount) as revenue
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_DELIVERIES d
+        JOIN PIZZA_INTELLIGENCE.ANALYTICS.DIM_STORES s ON d.store_id = s.store_id
+        JOIN PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS o ON d.order_id = o.order_id
+        WHERE d.delivery_date IN (SELECT friday_date FROM fridays)
+        GROUP BY d.store_id, s.store_name, s.city, d.delivery_date
+      ),
+      trends AS (
+        SELECT 
+          store_name,
+          city,
+          MIN(avg_delivery_time) as earliest_delivery_time,
+          MAX(avg_delivery_time) as latest_delivery_time,
+          MAX(avg_delivery_time) - MIN(avg_delivery_time) as delivery_time_increase,
+          MIN(revenue) as earliest_revenue,
+          MAX(revenue) as latest_revenue
+        FROM delivery_by_week
+        GROUP BY store_name, city
+      )
+      SELECT 
+        store_name,
+        city,
+        ROUND(earliest_delivery_time, 1) as delivery_time_4_weeks_ago,
+        ROUND(latest_delivery_time, 1) as delivery_time_last_friday,
+        ROUND(delivery_time_increase, 1) as delivery_time_increase_minutes,
+        earliest_revenue as revenue_4_weeks_ago,
+        latest_revenue as revenue_last_friday,
+        CASE WHEN latest_revenue >= earliest_revenue THEN 'Revenue stable despite delays' ELSE 'Revenue declining' END as risk_status
+      FROM trends
+      WHERE delivery_time_increase > 0
+      ORDER BY delivery_time_increase DESC
+
+  - name: thin_crust_vs_pan_by_channel
+    question: Compare thin-crust vs pan-pizza performance across channels over the last 8 weeks
+    sql: |
+      SELECT 
+        oi.crust_type,
+        o.order_channel as channel,
+        COUNT(DISTINCT oi.order_id) as total_orders,
+        SUM(oi.quantity) as units_sold,
+        ROUND(SUM(oi.line_total), 2) as total_revenue,
+        ROUND(AVG(oi.line_total), 2) as avg_order_value
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.V_ORDER_ITEMS oi
+      JOIN PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS o ON oi.order_id = o.order_id
+      WHERE oi.crust_type IN ('thin_crust', 'pan')
+        AND oi.order_date >= CURRENT_DATE() - 56
+      GROUP BY oi.crust_type, o.order_channel
+      ORDER BY oi.crust_type, total_revenue DESC
+
+  - name: late_delivery_causes_last_friday
+    question: Which stores had the highest late delivery rates last Friday and what were the main causes?
+    sql: |
+      WITH friday_date AS (
+        SELECT DATEADD(day, -MOD(DAYOFWEEK(CURRENT_DATE()) + 2, 7), CURRENT_DATE()) as last_friday
+      )
+      SELECT 
+        s.store_name,
+        s.city,
+        COUNT(*) as total_deliveries,
+        SUM(CASE WHEN d.is_late THEN 1 ELSE 0 END) as late_deliveries,
+        ROUND(SUM(CASE WHEN d.is_late THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) as late_delivery_pct,
+        AVG(d.delivery_duration_min) as avg_delivery_time_minutes,
+        MODE(d.late_reason) as most_common_delay_reason
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_DELIVERIES d
+      JOIN PIZZA_INTELLIGENCE.ANALYTICS.DIM_STORES s ON d.store_id = s.store_id
+      WHERE d.delivery_date = (SELECT last_friday FROM friday_date)
+      GROUP BY s.store_name, s.city
+      ORDER BY late_delivery_pct DESC
+
+  - name: friday_inventory_patterns
+    question: Based on historical Friday patterns, which stores should prepare extra inventory this week?
+    sql: |
+      WITH friday_orders AS (
+        SELECT 
+          o.store_id,
+          s.store_name,
+          s.city,
+          AVG(o.item_count) as avg_items_per_order,
+          COUNT(*) as avg_friday_orders,
+          SUM(o.total_amount) as avg_friday_revenue
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS o
+        JOIN PIZZA_INTELLIGENCE.ANALYTICS.DIM_STORES s ON o.store_id = s.store_id
+        WHERE DAYNAME(o.order_date) = 'Fri'
+          AND o.order_date >= CURRENT_DATE() - 28
+        GROUP BY o.store_id, s.store_name, s.city
+      ),
+      inventory_status AS (
+        SELECT 
+          store_id,
+          AVG(CASE WHEN ingredient_name LIKE '%dough%' THEN current_stock END) as avg_dough_stock,
+          AVG(CASE WHEN ingredient_name LIKE '%pepperoni%' THEN current_stock END) as avg_pepperoni_stock
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_INVENTORY
+        WHERE snapshot_date >= CURRENT_DATE() - 7
+        GROUP BY store_id
+      )
+      SELECT 
+        fo.store_name,
+        fo.city,
+        fo.avg_friday_orders as typical_friday_orders,
+        ROUND(fo.avg_friday_revenue, 0) as typical_friday_revenue,
+        fo.avg_items_per_order,
+        'High demand store - ensure extra dough and pepperoni prep' as recommendation
+      FROM friday_orders fo
+      LEFT JOIN inventory_status inv ON fo.store_id = inv.store_id
+      ORDER BY fo.avg_friday_revenue DESC
+      LIMIT 10
+
+  - name: complaint_themes_summary
+    question: Summarize customer complaint themes from recent reviews and map them to operational issues
+    sql: |
+      SELECT 
+        s.city,
+        s.store_name,
+        AVG(d.customer_rating) as avg_delivery_rating,
+        SUM(CASE WHEN d.is_late THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as late_pct,
+        AVG(d.delivery_duration_min) as avg_delivery_time,
+        CASE 
+          WHEN AVG(d.delivery_duration_min) > 30 THEN 'DELIVERY: Long delivery times - check routing and staffing'
+          WHEN SUM(CASE WHEN d.is_late THEN 1 ELSE 0 END) * 100.0 / COUNT(*) > 20 THEN 'DELIVERY: High late rate - investigate causes'
+          WHEN AVG(d.customer_rating) < 3.5 THEN 'QUALITY: Low ratings - review food quality and service'
+          ELSE 'OPERATIONAL: Performance acceptable'
+        END as primary_issue_category,
+        MODE(d.late_reason) as common_delay_reason
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_DELIVERIES d
+      JOIN PIZZA_INTELLIGENCE.ANALYTICS.DIM_STORES s ON d.store_id = s.store_id
+      WHERE d.delivery_date >= CURRENT_DATE() - 30
+      GROUP BY s.city, s.store_name
+      ORDER BY avg_delivery_rating ASC
+
+  - name: sales_by_city_last_week
+    question: What were our total sales last week by city?
+    sql: |
+      SELECT 
+        s.city,
+        COUNT(DISTINCT o.order_id) as total_orders,
+        ROUND(SUM(o.total_amount), 2) as total_revenue,
+        ROUND(AVG(o.total_amount), 2) as avg_order_value,
+        COUNT(DISTINCT o.store_id) as stores
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS o
+      JOIN PIZZA_INTELLIGENCE.ANALYTICS.DIM_STORES s ON o.store_id = s.store_id
+      WHERE o.order_date >= CURRENT_DATE() - 7
+      GROUP BY s.city
+      ORDER BY total_revenue DESC
+
+  - name: top_stores_by_revenue
+    question: What are the top performing stores by revenue this month?
+    sql: |
+      SELECT 
+        s.store_name,
+        s.city,
+        s.region,
+        COUNT(DISTINCT o.order_id) as total_orders,
+        ROUND(SUM(o.total_amount), 2) as total_revenue,
+        ROUND(AVG(o.total_amount), 2) as avg_order_value
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS o
+      JOIN PIZZA_INTELLIGENCE.ANALYTICS.DIM_STORES s ON o.store_id = s.store_id
+      WHERE o.order_date >= DATE_TRUNC('month', CURRENT_DATE())
+      GROUP BY s.store_name, s.city, s.region
+      ORDER BY total_revenue DESC
+      LIMIT 10
 
