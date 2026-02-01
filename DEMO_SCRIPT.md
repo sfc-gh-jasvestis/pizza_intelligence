@@ -1,233 +1,306 @@
-# 🍕 Pizza Time Machine Kitchen - Demo Script
+# Pizza Time Machine Kitchen - Demo Script
 
 ## Snowflake Intelligence Demo for QSR Partners
 
-This demo script is designed to accompany your partner presentation. It showcases how Snowflake Intelligence transforms scattered pizza data into actionable intelligence.
+This demo script walks through both personas: **Snowflake Intelligence users** (HQ analysts) and **Store Managers** (Streamlit app). Use this guide to deliver a compelling demo of AI-powered pizza operations.
 
 ---
 
 ## Pre-Demo Setup Checklist
 
-- [ ] Run all SQL scripts in order (01 through 07)
+- [ ] Run all SQL scripts in order (01 through 10)
 - [ ] Upload `semantic_models/pizza_intelligence.yaml` to the stage
 - [ ] Create the Pizza Ops Agent in Snowflake Intelligence UI
-- [ ] Test 2-3 queries to ensure everything is working
+- [ ] (Optional) Start the Streamlit app for Store Manager demo
+- [ ] Test 2-3 queries from each persona to ensure everything works
 - [ ] Have the partner presentation open alongside the demo
 
 ---
 
-## Demo Flow (Aligned with Slides)
+## Demo Overview
 
-### 🎬 Opening Hook (Slide 1)
-**Set the scene** while showing the Snowflake Intelligence UI:
-
-> "Let me show you what the Pizza Time Machine Kitchen looks like in action..."
-
----
-
-### 📊 Demo Section 1: Past Pizza (Structured Data)
-**Slide Reference:** Act 1 - Stuck in Pizza Past
-
-Start with basic analytics to show what's in the data:
-
-#### Question 1: Basic Sales Overview
-```
-What were our total sales last week by store?
-```
-**Expected:** Table of stores with store names, revenue, and order counts. Shows regional performance.
-
-#### Question 2: Delivery Performance
-```
-What's our late delivery rate this month by city?
-```
-**Expected:** Shows late delivery rates broken down by city, with insights on which regions need attention.
-
-#### Question 2b: Delivery Root Causes
-```
-What are the main reasons for late deliveries?
-```
-**Expected:** Breakdown of late_reason (traffic, kitchen_delay, rider_shortage, weather).
-
-**Talking Point:** 
-> "This is the kind of question that used to require a BI analyst and 2 days. Now any operator can ask in natural language."
+| Section | Persona | Interface | Duration |
+|---------|---------|-----------|----------|
+| Part 1 | Snowflake Intelligence Users | ai.snowflake.com | 15 min |
+| Part 2 | Store Managers | Streamlit App | 10 min |
+| Wrap-up | Both | Side-by-side | 5 min |
 
 ---
 
-### 🔧 Demo Section 2: The Engine (Multi-Tool Power)
-**Slide Reference:** Slide 3 - Snowflake Intelligence Engine
+# PART 1: Snowflake Intelligence Users
 
-Show how the agent combines structured and unstructured data:
+*For Analysts, HQ ops, and partner builders working in the SI UI*
 
-#### Question 3: Root Cause Analysis (THE KEY DEMO MOMENT)
-```
-Why did thin-crust sales dip in Chicago last night?
-```
+## Opening Hook
 
-**What happens:**
-1. Agent queries `pizza_analytics` → analyzes order patterns, finds anomalies
-2. Agent searches `pizza_documents` → finds relevant context:
-   - Customer reviews mentioning "Crispy Crust Co." competitor
-   - Audit reports noting equipment issues and quality concerns
-   - Feedback about delivery challenges
+> "Let me show you what happens when we turn 12 months of pizza data into an intelligent assistant that HQ analysts can query in natural language..."
 
-**What makes this powerful:**
-The agent doesn't just answer your question - it **discovers unexpected patterns** in the data. It might find:
-- Operational anomalies (early closures, staffing gaps)
-- Time-based patterns (peak hour issues)
-- Store-specific problems
-
-Then it enriches this with **document context** about competitors, quality issues, and customer sentiment.
-
-**Talking Point:**
-> "Notice how the agent found something we didn't explicitly ask about - that's the power of AI-driven analysis. It doesn't just answer what you ask, it finds what actually matters. AND it pulled in context from our unstructured documents about competitor threats and equipment issues."
-
-**Partner Value:**
-> "This is the multi-tool orchestration the partner configures. The semantic model defines WHAT data means, the agent decides HOW to analyze it. The partner owns that intelligence layer."
+Open [ai.snowflake.com](https://ai.snowflake.com) and select the **Pizza Ops Agent**.
 
 ---
 
-### 🏈 Demo Section 3: Future Pizza Prophecy
-**Slide Reference:** Slide 7 - Future Pizza Prophecy
+## Question 1: Capacity Gap Analysis (THE KEY DEMO MOMENT)
 
-This is the "wow" moment - predictive recommendations:
+```
+Across all stores last Friday, which cities saw the biggest gap between order demand and kitchen capacity, and why?
+```
 
-#### Question 4: Next Friday Forecast
-```
-What should we expect for next Friday night at our stores near stadiums?
-```
+**What It Demonstrates:**
+- Multi-table joins (orders + kitchen capacity + deliveries + events)
+- Cross-city comparison
+- Root cause identification
 
 **Expected Response:**
-> "Next Friday is an NFL game day at [Stadium]. Based on historical patterns:
-> - Expect 22% spike in pepperoni and family combo orders
-> - Peak hours: 5-9 PM
-> 
-> **Recommendations:**
-> - Increase pepperoni inventory by 20% at stores within 5km of stadium
-> - Schedule 2 additional riders per store from 5-9 PM
-> - Pre-stage dough prep 2 hours before game time
-> - Consider activating 'Game Day Feast' promotion"
-
-#### Question 5: Weather-Based Promo Recommendation
-```
-What's the best promo to run if Phoenix has a heatwave next week?
-```
-
-**Expected Response:**
-> "Based on historical performance during hot weather periods:
-> - Cold drinks and light options see 15% increase
-> - Delivery orders increase (people don't want to go out)
-> 
-> **Recommended:** 'Sun & Slice' summer bundle with 20% discount
-> - Historical ROI: 180% on similar campaigns
-> - Projected uplift: $45K in Phoenix region"
+Agent should identify Chicago Loop with:
+- 45% thin-crust capacity (vs 90%+ elsewhere)
+- Only 2 of 4 ovens operational
+- Main issue: "Oven 2 repair pending, Oven 3 temperature calibration issues"
 
 **Talking Point:**
-> "This is the Future Pizza Prophecy - not just showing what happened, but recommending what to do next. The partner builds this intelligence layer, we provide the engine."
+> "Notice how the agent combined order data, kitchen capacity, and operational context to find not just WHAT happened but WHY. This query would have taken a BI analyst hours to build manually."
 
 ---
 
-### 📄 Demo Section 4: Document Intelligence
-**Slide Reference:** Slide 4 - Kitchen Modernization
+## Question 2: Leading Indicator Analysis
 
-Show the power of unstructured data:
-
-#### Question 6: Customer Sentiment (GREAT FOR SHOWING SEARCH)
 ```
-What are customers saying about our Chicago stores?
+Show me stores where delivery time has been worsening over the last 4 Fridays but revenue hasn't dropped yet. What's driving the delay risk?
 ```
 
-**Expected:** Agent searches feedback documents and finds:
-- Delivery delay complaints (I-90 construction)
-- Thin-crust quality concerns
-- Competitor mentions (Crispy Crust Co.)
-- Positive feedback about Wrigleyville staff
-
-**Talking Point:**
-> "This question goes directly to our unstructured customer feedback - reviews, NPS comments, social mentions. Data that used to sit in PDFs and never get analyzed."
-
-#### Question 7: Audit Findings
-```
-What were the key findings from our recent store audits?
-```
-
-**Expected:** Agent searches audit documents and finds:
-- Chicago Loop: 87/100 score, pepperoni wastage issue, Oven 2 needs repair
-- Wrigleyville: 94/100 score, Game Day Prep Protocol best practice
-- Equipment issues and action items
-
-#### Question 8: Supplier Quality
-```
-Have there been any supplier quality issues recently?
-```
-
-**Expected:** Agent finds invoice documents mentioning:
-- Bell pepper spoilage from Arizona Produce (credit memo pending)
-- All cheese and meat deliveries passed inspection
-
----
-
-### 🎯 Demo Section 5: Campaign ROI
-**Slide Reference:** Slide 5 - QSR Master Schema (Your IP)
-
-Show the value of semantic models:
-
-#### Question 8: Campaign Performance
-```
-Which of our current campaigns has the best ROI?
-```
+**What It Demonstrates:**
+- Trend analysis over time
+- Leading vs lagging indicator detection
+- Proactive risk identification
 
 **Expected Response:**
-Table showing campaigns ranked by ROI with revenue, cost, and recommendations.
+Agent should analyze:
+- Week-over-week delivery time trends
+- Revenue stability despite service degradation
+- Root causes (rider shortage, traffic, kitchen delays)
 
-#### Question 9: Promotional Optimization
-```
-How is the Tuesday 2-for-1 promotion performing compared to Game Day Feast?
-```
-
-**Expected:** Comparative analysis with actionable insights.
-
----
-
-## 💡 Improvised Questions to Try
-
-Based on partner interest, try these follow-up questions:
-
-### For Operations-Focused Partners:
-```
-Which stores are understaffed during evening shifts?
-```
-```
-What's our current pepperoni inventory across Chicago stores?
-```
-```
-Show me labor costs vs revenue by store this week.
-```
-
-### For Marketing-Focused Partners:
-```
-What customer segments have the highest lifetime value?
-```
-```
-How do app orders compare to phone orders in average ticket size?
-```
-```
-What are customers saying about our loyalty program?
-```
-
-### For Executive Audiences:
-```
-Give me a summary of this week's key operational issues.
-```
-```
-What are our top 3 opportunities to improve profitability?
-```
-```
-Compare our Chicago region performance to Miami.
-```
+**Talking Point:**
+> "This is proactive intelligence - finding problems BEFORE they hit the bottom line. Traditional BI shows you the fire after the house burns down. This shows you the smoke."
 
 ---
 
-## 🚫 Questions to Avoid (Known Limitations)
+## Question 3: Product Channel Analysis
+
+```
+Compare thin-crust vs pan-pizza performance across channels (app vs in-store vs aggregators) over the last 8 weeks and explain the main trends.
+```
+
+**What It Demonstrates:**
+- Product mix analysis
+- Channel performance comparison
+- Trend explanation with context
+
+**Expected Response:**
+Agent should show:
+- Thin-crust vs pan performance by channel
+- Aggregator channel trends (third-party apps)
+- Possible explanations (competitor activity, weather, promotions)
+
+**Talking Point:**
+> "Partners building QSR intelligence need to understand not just what's selling, but WHERE and WHY. This is the kind of analysis that informs menu strategy and channel investments."
+
+---
+
+## Question 4: Predictive Recommendations
+
+```
+Using order history, weather, and local events, which 10 stores are most at risk of stock-outs this coming Friday, and what should their target dough prep be?
+```
+
+**What It Demonstrates:**
+- Multi-source predictive analytics
+- Actionable recommendations
+- Operational prescriptions
+
+**Expected Response:**
+Agent should:
+- Rank stores by stock-out risk
+- Factor in weather forecast and events
+- Provide specific dough prep targets
+
+**Talking Point:**
+> "This is the Future Pizza Prophecy - the agent doesn't just describe the past, it prescribes action for the future. This is where partner IP becomes incredibly valuable."
+
+---
+
+## Question 5: Unstructured + Structured Fusion
+
+```
+For our top 50 stores by revenue, summarize the most common complaint themes in reviews from the past month and map them to operational issues (delivery, quality, pricing).
+```
+
+**What It Demonstrates:**
+- Cortex Search for unstructured documents
+- Cortex Analyst for structured rankings
+- Theme extraction and categorization
+
+**Expected Response:**
+Agent should:
+- Identify top stores by revenue
+- Search customer reviews and feedback
+- Categorize complaints into operational buckets
+- Highlight Chicago Loop quality issues and competitor mentions
+
+**Talking Point:**
+> "This is the magic of multi-tool orchestration. The agent queried structured sales data AND searched through unstructured customer reviews to connect financial performance with customer sentiment. No manual report could do this in real-time."
+
+---
+
+# PART 2: Store Managers (Streamlit App)
+
+*For front-line users of your "Manager's Co-Pilot"*
+
+## Setting the Scene
+
+> "Now let's see what this looks like for a store manager - someone who doesn't know SQL and just wants to run their store better."
+
+Open the Streamlit app (`pizza_ops_assistant.py`) or show the Manager's Co-Pilot UI.
+
+---
+
+## Question 1: Last Night Analysis
+
+```
+Why were my sales lower than usual last night in this store?
+```
+
+**Alternative (pre-canned button):**
+> "Explain last night's dip for Store 42"
+
+**What It Demonstrates:**
+- Single-store focus
+- Historical comparison
+- Root cause for a specific shift
+
+**Expected Response:**
+Agent should analyze:
+- Comparison to same day last week
+- Any capacity or staffing issues
+- Weather or event factors
+
+**Talking Point:**
+> "Store managers don't want to query across 50 stores - they want to understand THEIR store. The app automatically filters to their location."
+
+---
+
+## Question 2: Friday Night Prep
+
+```
+What should I get ready for this Friday night shift?
+```
+
+**Alternative:**
+> "Given past Fridays, weather, and events, what do I need more of (staff, dough, riders) from 5-9pm?"
+
+**What It Demonstrates:**
+- Shift-level planning
+- Multi-factor forecasting
+- Actionable prep list
+
+**Expected Response:**
+Agent should provide:
+- Expected order volume (vs typical Friday)
+- Staffing recommendations
+- Dough prep targets
+- Any special events to prepare for
+
+**Talking Point:**
+> "This is the 'what do I do' question every manager asks. Instead of gut feel, they get data-driven prep guidance."
+
+---
+
+## Question 3: Delivery Performance
+
+```
+Are my delivery times getting worse, and what's causing it?
+```
+
+**Alternative:**
+> "Compare my delivery performance this week vs last week and tell me why it changed."
+
+**What It Demonstrates:**
+- Trend comparison
+- Root cause by factor
+- Actionable insights
+
+**Expected Response:**
+Agent should show:
+- Week-over-week delivery time comparison
+- Breakdown by reason (traffic, kitchen, riders)
+- Specific recommendations
+
+---
+
+## Question 4: Store Improvement Priorities
+
+```
+What are the top 3 things I should fix this week to improve my store score?
+```
+
+**What It Demonstrates:**
+- KPI + complaint fusion
+- Prioritized recommendations
+- Actionable to-do list
+
+**Expected Response:**
+Agent should blend:
+- Operational KPIs (delivery time, order accuracy)
+- Customer complaints from reviews
+- Prioritized action items
+
+**Talking Point:**
+> "This is the Manager's Co-Pilot generating a personalized action plan. It's not just dashboards - it's a to-do list powered by AI."
+
+---
+
+## Question 5: Customer Sentiment
+
+```
+Show me my happiest and unhappiest customers from the last 7 days and what they mentioned.
+```
+
+**What It Demonstrates:**
+- Customer-level sentiment
+- Review summarization
+- Feedback categorization
+
+**Expected Response:**
+Agent should:
+- Identify 5-star vs 1-2 star reviews
+- Summarize what made customers happy/unhappy
+- Highlight specific issues mentioned
+
+---
+
+# Wrap-Up: Side-by-Side Comparison
+
+## Before vs After
+
+| Before (Legacy Pantry) | After (Pizza Time Machine) |
+|------------------------|---------------------------|
+| "What were thin-crust sales?" → 2-day BI request | Instant answer with context |
+| "Why did sales drop?" → Manual investigation | Multi-source analysis in seconds |
+| "What should we do Friday?" → Gut feel | Data-driven recommendations |
+| "What are customers saying?" → Unread PDF reports | Real-time sentiment fusion |
+
+## Partner Value Callouts
+
+| Demo Section | Partner Opportunity |
+|--------------|---------------------|
+| Multi-tool orchestration | Partners configure the semantic model + agent logic |
+| Predictive recommendations | QSR-specific IP that turns generic AI into Pizza Intelligence |
+| Document search | Kitchen Modernization brings dark data into SI |
+| Store Manager app | Manager's Co-Pilot as custom app on SI APIs |
+
+---
+
+# Questions to Avoid
+
+These may not work well with current data:
 
 - Real-time inventory updates (data is daily snapshots)
 - Individual customer PII queries
@@ -236,53 +309,26 @@ Compare our Chicago region performance to Miami.
 
 ---
 
-## Partner Value Callouts
+# Troubleshooting
 
-Throughout the demo, reinforce these partner opportunities:
-
-| After This Demo Section | Say This |
-|------------------------|----------|
-| Root cause analysis | "This multi-tool intelligence is what partners configure - the semantic models and agent orchestration" |
-| Forecast recommendations | "Partners own this IP - the QSR-specific logic that turns generic AI into Pizza Intelligence" |
-| Document search | "Kitchen Modernization brings these dark data sources into Snowflake where SI can use them" |
-| Campaign ROI | "These metrics and verified queries are the partner's reusable schema" |
-
----
-
-## Closing Demo Summary
-
-End the demo with a side-by-side:
-
-**Before (Legacy Pantry):**
-- "What were thin-crust sales?" → 2-day BI request
-- "Why did sales drop?" → Manual investigation, maybe never answered
-- "What should we do Friday?" → Gut feel and experience
-
-**After (Pizza Time Machine):**
-- "What were thin-crust sales?" → Instant answer with context
-- "Why did sales drop?" → Multi-source analysis in seconds
-- "What should we do Friday?" → Data-driven recommendations
-
-> "This is what the partner builds on Snowflake Intelligence - Pizza Intelligence as a Service. Reusable across every QSR client."
-
----
-
-## Troubleshooting
-
-### If queries return unexpected results:
-1. Check that all SQL scripts ran successfully
-2. Verify semantic model is uploaded to stage
-3. Ensure agent has both tools configured
-4. Check warehouse is running
+### If queries return no results:
+1. Run `setup/10_test_demo_queries.sql` to verify data
+2. Check "last Friday" is within the data range
+3. Verify semantic model is uploaded to stage
 
 ### If documents aren't being searched:
-1. Verify Cortex Search service is created and running
-2. Check that documents are in PIZZA_DOCUMENTS table
-3. Test search service directly with SEARCH_PREVIEW function
+1. Check Cortex Search service status: `DESCRIBE CORTEX SEARCH SERVICE PIZZA_INTELLIGENCE.DOCUMENTS.PIZZA_DOCUMENT_SEARCH;`
+2. Verify documents exist in `PIZZA_DOCUMENTS` table
+3. Wait for index refresh if documents were recently added
+
+### If Streamlit app doesn't connect:
+1. Verify `.streamlit/secrets.toml` has correct credentials
+2. Check warehouse is running
+3. Confirm user has access to PIZZA_INTELLIGENCE database
 
 ---
 
-## Next Steps After Demo
+# After the Demo
 
 1. Identify target pizza/QSR client for pilot
 2. Schedule 2-week sprint kickoff
@@ -291,3 +337,6 @@ End the demo with a side-by-side:
 
 **Remember:** We're not selling a tool, we're selling a partnership to build Pizza Intelligence as a Service!
 
+---
+
+*For detailed setup instructions, see README.md*

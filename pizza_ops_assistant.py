@@ -48,21 +48,25 @@ API_TIMEOUT = 60000  # milliseconds
 
 # Sample questions for store managers - aligned with demo scenarios
 SAMPLE_QUESTIONS = {
-    ":green[:material/trending_up:] Thin-Crust Analysis": {
-        "question": "Why did thin-crust sales dip in Chicago last night?",
+    ":red[:material/nightlight:] Last Night Analysis": {
+        "question": "Why were my sales lower than usual last night in this store?",
         "type": "both"
+    },
+    ":orange[:material/calendar_today:] Friday Prep": {
+        "question": "What should I get ready for this Friday night shift? Given past Fridays, weather, and events, what do I need more of (staff, dough, riders) from 5-9pm?",
+        "type": "analyst"
     },
     ":blue[:material/local_shipping:] Delivery Performance": {
-        "question": "Are my delivery times getting worse, and what's causing it?",
+        "question": "Are my delivery times getting worse, and what's causing it? Compare my delivery performance this week vs last week.",
         "type": "both"
     },
-    ":orange[:material/rate_review:] Customer Feedback": {
-        "question": "What are customers saying about our thin crust pizza?",
-        "type": "search"
+    ":green[:material/checklist:] Store Improvement": {
+        "question": "What are the top 3 things I should fix this week to improve my store score?",
+        "type": "both"
     },
-    ":red[:material/calendar_today:] Friday Prep": {
-        "question": "What should I get ready for this Friday night?",
-        "type": "analyst"
+    ":violet[:material/rate_review:] Customer Sentiment": {
+        "question": "Show me my happiest and unhappiest customers from the last 7 days and what they mentioned.",
+        "type": "search"
     },
 }
 
