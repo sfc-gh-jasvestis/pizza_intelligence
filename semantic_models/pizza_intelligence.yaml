@@ -1199,50 +1199,6 @@ tables:
         default_aggregation: sum
 
 # ============================================================================
-# RELATIONSHIPS - Define how tables connect to each other
-# ============================================================================
-relationships:
-  - name: orders_to_order_items
-    left_table: orders
-    right_table: order_items
-    relationship_columns:
-      - left_column: order_id
-        right_column: order_id
-    join_type: one_to_many
-    relationship_type: one_to_many
-    
-  - name: orders_to_deliveries
-    left_table: orders
-    right_table: deliveries
-    relationship_columns:
-      - left_column: order_id
-        right_column: order_id
-    join_type: one_to_one
-    relationship_type: one_to_one
-    
-  - name: orders_to_kitchen_capacity
-    left_table: orders
-    right_table: kitchen_capacity
-    relationship_columns:
-      - left_column: store_id
-        right_column: store_id
-      - left_column: order_date
-        right_column: capacity_date
-    join_type: many_to_one
-    relationship_type: many_to_one
-    
-  - name: deliveries_to_kitchen_capacity
-    left_table: deliveries
-    right_table: kitchen_capacity
-    relationship_columns:
-      - left_column: store_id
-        right_column: store_id
-      - left_column: delivery_date
-        right_column: capacity_date
-    join_type: many_to_one
-    relationship_type: many_to_one
-
-# ============================================================================
 # VERIFIED QUERIES - Pre-validated queries for common questions
 # ============================================================================
 verified_queries:

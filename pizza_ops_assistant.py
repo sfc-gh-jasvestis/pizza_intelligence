@@ -132,6 +132,52 @@ def get_auth_token() -> str:
 
 
 # =============================================================================
+# MANAGER INSIGHTS - Generate actionable recommendations from data
+# =============================================================================
+
+def generate_manager_insights(question: str, data_summary: str, store_name: str) -> str:
+    """
+    Use Cortex LLM to generate actionable recommendations for store managers
+    based on the data retrieved by Cortex Analyst.
+    """
+    conn = get_snowflake_connection()
+    
+    prompt = f"""You are a helpful assistant for a pizza store manager at {store_name}.
+Based on the following data, provide 2-3 brief, actionable recommendations.
+Be concise and practical - this manager needs to know WHAT TO DO.
+
+Question asked: {question}
+
+Data retrieved:
+{data_summary}
+
+Provide your response in this format:
+📊 **Key Insight:** [One sentence summary of what the data shows]
+
+✅ **Recommended Actions:**
+1. [First specific action]
+2. [Second specific action]
+3. [Third specific action if needed]
+
+Keep it brief and actionable. No more than 100 words total."""
+
+    try:
+        result = conn.session().sql(f"""
+            SELECT SNOWFLAKE.CORTEX.COMPLETE(
+                'mistral-large2',
+                '{prompt.replace("'", "''")}'
+            ) as response
+        """).collect()
+        
+        if result and len(result) > 0:
+            return result[0]['RESPONSE']
+        return None
+    except Exception as e:
+        # Silently fail - insights are optional enhancement
+        return None
+
+
+# =============================================================================
 # QUERY TYPE DETECTION
 # =============================================================================
 
@@ -429,15 +475,15 @@ def display_search_content(content: str, documents: List[Dict], message_index: i
                 st.divider()
 
 
-def display_sql_results(sql: str):
-    """Execute SQL and display results with visualization options."""
+def display_sql_results(sql: str) -> str:
+    """Execute SQL and display results with visualization options. Returns data as string for LLM."""
     try:
         with st.spinner("Running query..."):
             df = execute_sql(sql)
         
         if df.empty:
             st.info("Query returned no results.")
-            return
+            return None
             
         # Create tabs for different views
         if len(df) > 1 and len(df.columns) >= 2:
@@ -458,9 +504,13 @@ def display_sql_results(sql: str):
                     st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # Return data as string for LLM processing (limit to first 10 rows)
+        return df.head(10).to_string(index=False)
             
     except Exception as e:
         st.error(f"Error executing query: {e}")
+        return None
 
 
 def process_user_question(question: str, force_type: Optional[str] = None):
@@ -577,9 +627,20 @@ def process_user_question(question: str, force_type: Optional[str] = None):
                     sql_statement = display_message_content(analyst_content, message_idx)
                     
                     # Execute and display SQL results if present
+                    data_summary = None
                     if sql_statement:
                         st.divider()
-                        display_sql_results(sql_statement)
+                        data_summary = display_sql_results(sql_statement)
+                    
+                    # Generate manager insights/recommendations
+                    store_name = st.session_state.get("selected_store", "your store")
+                    if data_summary:
+                        with st.spinner("Generating recommendations..."):
+                            insights = generate_manager_insights(question, data_summary, store_name)
+                            if insights:
+                                st.divider()
+                                st.markdown("### 💡 Manager Recommendations")
+                                st.markdown(insights)
                     
                     # Store assistant response
                     st.session_state.messages.append({
