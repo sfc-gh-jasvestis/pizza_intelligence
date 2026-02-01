@@ -144,51 +144,41 @@ tables:
         data_type: TIMESTAMP_NTZ
 
     measures:
-      - name: total_orders
-        description: Count of orders
-        expr: COUNT(DISTINCT order_id)
+      - name: total_amount
+        description: Order total amount including tax, delivery fees, and tips
+        expr: total_amount
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: total_revenue
-        description: Total revenue from orders including tax, delivery fees, and tips
-        expr: SUM(total_amount)
+      - name: subtotal
+        description: Subtotal before tax, fees, and tips
+        expr: subtotal
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: net_sales
-        description: Sales before tax, fees, and tips (subtotal minus discounts)
-        expr: SUM(subtotal - discount_amount)
+      - name: discount_amount
+        description: Discount amount applied to order
+        expr: discount_amount
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: total_discounts
-        description: Total discount amount given
-        expr: SUM(discount_amount)
+      - name: item_count
+        description: Number of items in the order
+        expr: item_count
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: average_order_value
-        description: Average revenue per order
-        expr: AVG(total_amount)
+      - name: delivery_fee
+        description: Delivery fee charged
+        expr: delivery_fee
         data_type: NUMBER
-        synonyms: ['AOV', 'avg order value', 'average ticket']
+        default_aggregation: sum
         
-      - name: total_items_sold
-        description: Total number of items across all orders
-        expr: SUM(item_count)
+      - name: tip_amount
+        description: Tip amount
+        expr: tip_amount
         data_type: NUMBER
-        
-      - name: new_customer_orders
-        description: Count of first-time customer orders
-        expr: COUNT(DISTINCT CASE WHEN is_first_order THEN order_id END)
-        data_type: NUMBER
-        
-      - name: delivery_fee_revenue
-        description: Total delivery fees collected
-        expr: SUM(delivery_fee)
-        data_type: NUMBER
-        
-      - name: tip_revenue
-        description: Total tips collected
-        expr: SUM(tip_amount)
-        data_type: NUMBER
+        default_aggregation: sum
 
   # --------------------------------------------------------------------------
   # STORES - Location dimension
@@ -259,15 +249,11 @@ tables:
         data_type: BOOLEAN
 
     measures:
-      - name: store_count
-        description: Number of stores
-        expr: COUNT(DISTINCT store_id)
+      - name: stadium_distance_km
+        description: Distance to nearby stadium in km
+        expr: stadium_distance_km
         data_type: NUMBER
-        
-      - name: avg_stadium_distance
-        description: Average distance to nearby stadium in km
-        expr: AVG(stadium_distance_km)
-        data_type: NUMBER
+        default_aggregation: sum
 
   # --------------------------------------------------------------------------
   # PRODUCTS - Menu items
@@ -323,25 +309,17 @@ tables:
         data_type: BOOLEAN
 
     measures:
-      - name: product_count
-        description: Number of products
-        expr: COUNT(DISTINCT product_id)
+      - name: base_price
+        description: Product base price
+        expr: base_price
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: avg_price
-        description: Average base price
-        expr: AVG(base_price)
+      - name: cost
+        description: Product cost
+        expr: cost
         data_type: NUMBER
-        
-      - name: avg_margin
-        description: Average margin (price - cost)
-        expr: AVG(base_price - cost)
-        data_type: NUMBER
-        
-      - name: avg_margin_percent
-        description: Average margin percentage
-        expr: AVG((base_price - cost) / NULLIF(base_price, 0) * 100)
-        data_type: NUMBER
+        default_aggregation: sum
 
   # --------------------------------------------------------------------------
   # DELIVERIES - Delivery performance (pre-joined with store and calendar)
@@ -417,47 +395,23 @@ tables:
         data_type: VARCHAR
 
     measures:
-      - name: total_deliveries
-        description: Total number of deliveries
-        expr: COUNT(DISTINCT delivery_id)
+      - name: delivery_duration_min
+        description: Delivery duration in minutes
+        expr: delivery_duration_min
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: late_deliveries
-        description: Number of late deliveries
-        expr: COUNT(DISTINCT CASE WHEN is_late THEN delivery_id END)
+      - name: late_minutes
+        description: Minutes late for late deliveries
+        expr: late_minutes
         data_type: NUMBER
-        synonyms: ['delayed deliveries']
+        default_aggregation: sum
         
-      - name: on_time_deliveries
-        description: Number of on-time deliveries
-        expr: COUNT(DISTINCT CASE WHEN NOT is_late THEN delivery_id END)
+      - name: customer_rating
+        description: Customer rating (1-5 scale)
+        expr: customer_rating
         data_type: NUMBER
-        
-      - name: late_delivery_rate
-        description: Percentage of deliveries that were late
-        expr: COUNT(DISTINCT CASE WHEN is_late THEN delivery_id END) * 100.0 / NULLIF(COUNT(DISTINCT delivery_id), 0)
-        data_type: NUMBER
-        synonyms: ['delay rate', 'late rate']
-        
-      - name: on_time_rate
-        description: Percentage of deliveries that were on time
-        expr: COUNT(DISTINCT CASE WHEN NOT is_late THEN delivery_id END) * 100.0 / NULLIF(COUNT(DISTINCT delivery_id), 0)
-        data_type: NUMBER
-        
-      - name: avg_delivery_time
-        description: Average delivery duration in minutes
-        expr: AVG(delivery_duration_min)
-        data_type: NUMBER
-        
-      - name: avg_late_minutes
-        description: Average minutes late for late deliveries
-        expr: AVG(CASE WHEN is_late THEN late_minutes END)
-        data_type: NUMBER
-        
-      - name: avg_customer_rating
-        description: Average customer rating (1-5 scale)
-        expr: AVG(customer_rating)
-        data_type: NUMBER
+        default_aggregation: sum
         synonyms: ['delivery rating', 'rating']
 
   # --------------------------------------------------------------------------
@@ -520,20 +474,17 @@ tables:
         data_type: DATE
 
     measures:
-      - name: campaign_count
-        description: Number of campaigns
-        expr: COUNT(DISTINCT campaign_id)
+      - name: budget
+        description: Campaign budget
+        expr: budget
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: total_budget
-        description: Total campaign budget
-        expr: SUM(budget)
+      - name: discount_percent
+        description: Discount percentage
+        expr: discount_percent
         data_type: NUMBER
-        
-      - name: avg_discount_percent
-        description: Average discount percentage
-        expr: AVG(discount_percent)
-        data_type: NUMBER
+        default_aggregation: sum
 
   # --------------------------------------------------------------------------
   # CAMPAIGN PERFORMANCE - Marketing ROI (pre-joined with campaign and store)
@@ -595,51 +546,53 @@ tables:
         data_type: VARCHAR
 
     measures:
-      - name: total_impressions
-        description: Total ad impressions
-        expr: SUM(impressions)
+      - name: impressions
+        description: Ad impressions
+        expr: impressions
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: total_clicks
-        description: Total clicks on ads/promotions
-        expr: SUM(clicks)
+      - name: clicks
+        description: Clicks on ads/promotions
+        expr: clicks
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: click_through_rate
-        description: Click-through rate (clicks / impressions * 100)
-        expr: SUM(clicks) * 100.0 / NULLIF(SUM(impressions), 0)
+      - name: redemptions
+        description: Coupon/promo redemptions
+        expr: redemptions
         data_type: NUMBER
-        synonyms: ['CTR']
+        default_aggregation: sum
         
-      - name: total_redemptions
-        description: Total coupon/promo redemptions
-        expr: SUM(redemptions)
-        data_type: NUMBER
-        
-      - name: attributed_orders
+      - name: orders_attributed
         description: Orders attributed to campaigns
-        expr: SUM(orders_attributed)
+        expr: orders_attributed
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: attributed_revenue
+      - name: revenue_attributed
         description: Revenue attributed to campaigns
-        expr: SUM(revenue_attributed)
+        expr: revenue_attributed
         data_type: NUMBER
+        default_aggregation: sum
         
       - name: discount_cost
-        description: Total cost of discounts given
-        expr: SUM(discount_cost)
+        description: Cost of discounts given
+        expr: discount_cost
         data_type: NUMBER
+        default_aggregation: sum
         
       - name: incremental_revenue
         description: Incremental revenue generated above baseline
-        expr: SUM(incremental_revenue)
+        expr: incremental_revenue
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: campaign_roi
-        description: Average return on investment percentage
-        expr: AVG(roi_percent)
+      - name: roi_percent
+        description: ROI percentage
+        expr: roi_percent
         data_type: NUMBER
+        default_aggregation: sum
         synonyms: ['ROI', 'return on investment']
 
   # --------------------------------------------------------------------------
@@ -699,31 +652,24 @@ tables:
         sample_values: ['expired', 'damaged', 'quality', 'overproduction']
 
     measures:
-      - name: total_quantity_on_hand
-        description: Total quantity of items in stock
-        expr: SUM(quantity_on_hand)
+      - name: quantity_on_hand
+        description: Quantity of items in stock
+        expr: quantity_on_hand
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: total_wastage
-        description: Total units wasted
-        expr: SUM(wastage_units)
+      - name: wastage_units
+        description: Units wasted
+        expr: wastage_units
         data_type: NUMBER
+        default_aggregation: sum
         synonyms: ['waste', 'wasted']
         
-      - name: wastage_cost
-        description: Total cost of wasted inventory
-        expr: SUM(wastage_units * unit_cost)
+      - name: unit_cost
+        description: Unit cost
+        expr: unit_cost
         data_type: NUMBER
-        
-      - name: inventory_value
-        description: Total value of inventory on hand
-        expr: SUM(quantity_on_hand * unit_cost)
-        data_type: NUMBER
-        
-      - name: items_below_reorder
-        description: Count of items below reorder point
-        expr: COUNT(CASE WHEN quantity_on_hand < reorder_point THEN 1 END)
-        data_type: NUMBER
+        default_aggregation: sum
 
   # --------------------------------------------------------------------------
   # STAFFING - Labor and scheduling (pre-joined with store)
@@ -775,35 +721,35 @@ tables:
         data_type: BOOLEAN
 
     measures:
-      - name: total_scheduled_staff
-        description: Total staff scheduled
-        expr: SUM(scheduled_staff)
+      - name: scheduled_staff
+        description: Staff scheduled
+        expr: scheduled_staff
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: total_actual_staff
-        description: Total staff who actually worked
-        expr: SUM(actual_staff)
+      - name: actual_staff
+        description: Staff who actually worked
+        expr: actual_staff
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: staff_shortage
-        description: Difference between scheduled and actual staff
-        expr: SUM(scheduled_staff - actual_staff)
+      - name: overtime_hours
+        description: Overtime hours worked
+        expr: overtime_hours
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: total_overtime_hours
-        description: Total overtime hours worked
-        expr: SUM(overtime_hours)
+      - name: labor_cost
+        description: Labor cost
+        expr: labor_cost
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: total_labor_cost
-        description: Total labor cost
-        expr: SUM(labor_cost)
+      - name: riders_available
+        description: Delivery riders available
+        expr: riders_available
         data_type: NUMBER
-        
-      - name: total_riders
-        description: Total delivery riders available
-        expr: SUM(riders_available)
-        data_type: NUMBER
+        default_aggregation: sum
 
   # --------------------------------------------------------------------------
   # CALENDAR - Time dimension with events
@@ -879,15 +825,11 @@ tables:
         synonyms: ['weather']
 
     measures:
-      - name: game_day_count
-        description: Number of game days
-        expr: COUNT(CASE WHEN is_game_day THEN 1 END)
+      - name: high_temp_f
+        description: High temperature in Fahrenheit
+        expr: high_temp_f
         data_type: NUMBER
-        
-      - name: avg_high_temp
-        description: Average high temperature
-        expr: AVG(high_temp_f)
-        data_type: NUMBER
+        default_aggregation: sum
 
   # --------------------------------------------------------------------------
   # CUSTOMERS - Customer dimension
@@ -925,31 +867,333 @@ tables:
         data_type: VARCHAR
 
     measures:
-      - name: customer_count
-        description: Number of customers
-        expr: COUNT(DISTINCT customer_id)
+      - name: lifetime_value
+        description: Customer lifetime value
+        expr: lifetime_value
         data_type: NUMBER
-        
-      - name: avg_lifetime_value
-        description: Average customer lifetime value
-        expr: AVG(lifetime_value)
-        data_type: NUMBER
+        default_aggregation: sum
         synonyms: ['LTV', 'CLV']
         
-      - name: avg_loyalty_points
-        description: Average loyalty points per customer
-        expr: AVG(loyalty_points)
+      - name: loyalty_points
+        description: Loyalty points
+        expr: loyalty_points
         data_type: NUMBER
+        default_aggregation: sum
         
-      - name: total_lifetime_orders
-        description: Total orders across all customers
-        expr: SUM(lifetime_orders)
+      - name: lifetime_orders
+        description: Lifetime orders
+        expr: lifetime_orders
         data_type: NUMBER
+        default_aggregation: sum
+
+  # --------------------------------------------------------------------------
+  # KITCHEN CAPACITY - Oven and production capacity tracking
+  # --------------------------------------------------------------------------
+  - name: kitchen_capacity
+    description: |
+      Kitchen capacity and oven status tracking. Use this table to understand 
+      production constraints, oven downtime, and capacity issues that may affect
+      product availability. CRITICAL for understanding why certain pizza types 
+      (especially thin-crust) may have reduced sales.
+    base_table:
+      database: PIZZA_INTELLIGENCE
+      schema: ANALYTICS
+      table: V_KITCHEN_CAPACITY
+    
+    dimensions:
+      - name: capacity_id
+        description: Unique identifier for each capacity record
+        expr: capacity_id
+        data_type: VARCHAR
+        unique: true
+        
+      - name: store_id
+        description: Store identifier
+        expr: store_id
+        data_type: VARCHAR
+        
+      - name: store_name
+        description: Name of the store location
+        expr: store_name
+        data_type: VARCHAR
+        
+      - name: city
+        description: City where the store is located
+        expr: city
+        data_type: VARCHAR
+        sample_values: ['Phoenix', 'Chicago', 'New York', 'Los Angeles', 'Miami']
+        
+      - name: region
+        description: Geographic region
+        expr: region
+        data_type: VARCHAR
+        
+      - name: capacity_date
+        description: Date of capacity record
+        expr: capacity_date
+        data_type: DATE
+        
+      - name: shift_type
+        description: Type of shift (morning, afternoon, evening)
+        expr: shift_type
+        data_type: VARCHAR
+        sample_values: ['morning', 'afternoon', 'evening']
+        
+      - name: downtime_reason
+        description: Reason for oven downtime if any
+        expr: downtime_reason
+        data_type: VARCHAR
+        synonyms: ['oven issue', 'kitchen issue', 'equipment problem']
+        
+      - name: notes
+        description: Additional notes about kitchen capacity
+        expr: notes
+        data_type: VARCHAR
+        
+      - name: day_of_week
+        description: Day of the week
+        expr: day_of_week
+        data_type: VARCHAR
+        
+      - name: is_weekend
+        description: Whether it's a weekend
+        expr: is_weekend
+        data_type: BOOLEAN
+        
+      - name: is_game_day
+        description: Whether it's a game day
+        expr: is_game_day
+        data_type: BOOLEAN
+
+    measures:
+      - name: total_ovens
+        description: Total number of ovens
+        expr: total_ovens
+        data_type: NUMBER
+        default_aggregation: sum
+        
+      - name: ovens_operational
+        description: Number of operational ovens
+        expr: ovens_operational
+        data_type: NUMBER
+        default_aggregation: sum
+        synonyms: ['working ovens', 'available ovens']
+        
+      - name: oven_downtime_minutes
+        description: Minutes of oven downtime
+        expr: oven_downtime_minutes
+        data_type: NUMBER
+        default_aggregation: sum
+        synonyms: ['downtime', 'oven downtime']
+        
+      - name: max_pizzas_per_hour
+        description: Maximum pizza production capacity per hour
+        expr: max_pizzas_per_hour
+        data_type: NUMBER
+        default_aggregation: sum
+        
+      - name: actual_pizzas_made
+        description: Actual pizzas produced
+        expr: actual_pizzas_made
+        data_type: NUMBER
+        default_aggregation: sum
+        
+      - name: thin_crust_capacity_pct
+        description: Percentage of capacity available for thin-crust pizzas
+        expr: thin_crust_capacity_pct
+        data_type: NUMBER
+        default_aggregation: sum
+        synonyms: ['thin crust capacity', 'thin-crust availability']
+        
+      - name: pan_capacity_pct
+        description: Percentage of capacity available for pan pizzas
+        expr: pan_capacity_pct
+        data_type: NUMBER
+        default_aggregation: sum
+        
+      - name: stuffed_capacity_pct
+        description: Percentage of capacity available for stuffed crust pizzas
+        expr: stuffed_capacity_pct
+        data_type: NUMBER
+        default_aggregation: sum
+        
+      - name: kitchen_temp_f
+        description: Kitchen/oven temperature in Fahrenheit
+        expr: kitchen_temp_f
+        data_type: NUMBER
+        default_aggregation: sum
+        synonyms: ['oven temperature', 'oven temp']
+        
+      - name: dough_quality_score
+        description: Dough quality score (1-10 scale)
+        expr: dough_quality_score
+        data_type: NUMBER
+        default_aggregation: sum
+        synonyms: ['dough quality', 'dough score']
+
+  # --------------------------------------------------------------------------
+  # ORDER ITEMS - Product-level sales (CRITICAL for thin-crust vs pan analysis)
+  # --------------------------------------------------------------------------
+  - name: order_items
+    description: |
+      Individual line items from orders with product details. Each record represents
+      a specific product purchased. Use this table to analyze product mix, crust type
+      performance (thin-crust vs pan vs stuffed), and product-level revenue.
+      CRITICAL: Use this table for questions about specific pizza types or crust styles.
+    base_table:
+      database: PIZZA_INTELLIGENCE
+      schema: ANALYTICS
+      table: V_ORDER_ITEMS
+    
+    dimensions:
+      - name: order_item_id
+        description: Unique identifier for each line item
+        expr: order_item_id
+        data_type: VARCHAR
+        unique: true
+        
+      - name: order_id
+        description: Parent order identifier
+        expr: order_id
+        data_type: VARCHAR
+        
+      - name: order_date
+        description: Date when the order was placed
+        expr: order_date
+        data_type: DATE
+        
+      - name: product_id
+        description: Product identifier
+        expr: product_id
+        data_type: VARCHAR
+        
+      - name: product_name
+        description: Name of the product
+        expr: product_name
+        data_type: VARCHAR
+        
+      - name: product_category
+        description: Product category (pizza, sides, drinks, desserts)
+        expr: product_category
+        data_type: VARCHAR
+        sample_values: ['pizza', 'sides', 'drinks', 'desserts']
+        
+      - name: crust_type
+        description: Type of crust for pizzas - thin_crust, pan, or stuffed. Use this for thin-crust vs pan pizza comparisons.
+        expr: crust_type
+        data_type: VARCHAR
+        sample_values: ['thin_crust', 'pan', 'stuffed', 'combo', 'wings', 'salad', 'soda', 'breadsticks', 'cake', 'pastry']
+        synonyms: ['crust', 'crust style', 'pizza type', 'subcategory']
+        
+      - name: product_size
+        description: Size of the product
+        expr: product_size
+        data_type: VARCHAR
+        sample_values: ['small', 'medium', 'large', 'family', 'regular']
+        
+      - name: store_id
+        description: Store identifier
+        expr: store_id
+        data_type: VARCHAR
+        
+      - name: store_name
+        description: Name of the store location
+        expr: store_name
+        data_type: VARCHAR
+        
+      - name: city
+        description: City where the store is located
+        expr: city
+        data_type: VARCHAR
+        sample_values: ['Phoenix', 'Chicago', 'New York', 'Los Angeles', 'Miami']
+        
+      - name: region
+        description: Geographic region
+        expr: region
+        data_type: VARCHAR
+        sample_values: ['Southwest', 'Midwest', 'Northeast', 'West', 'Southeast']
+        
+      - name: order_channel
+        description: How the order was placed
+        expr: order_channel
+        data_type: VARCHAR
+        sample_values: ['app', 'web', 'phone', 'in_store', 'third_party']
+        
+      - name: day_of_week
+        description: Day of the week
+        expr: day_of_week
+        data_type: VARCHAR
+        
+      - name: is_weekend
+        description: Whether the order was on a weekend
+        expr: is_weekend
+        data_type: BOOLEAN
+        
+      - name: is_game_day
+        description: Whether the order was on a game day
+        expr: is_game_day
+        data_type: BOOLEAN
+
+    time_dimensions:
+      - name: order_timestamp
+        description: Exact timestamp when the order was placed
+        expr: order_timestamp
+        data_type: TIMESTAMP_NTZ
+
+    measures:
+      - name: quantity
+        description: Quantity of items sold
+        expr: quantity
+        data_type: NUMBER
+        default_aggregation: sum
+        synonyms: ['units sold', 'quantity sold', 'items sold']
+        
+      - name: line_total
+        description: Revenue from product sales
+        expr: line_total
+        data_type: NUMBER
+        default_aggregation: sum
+        synonyms: ['sales', 'revenue', 'product revenue']
+        
+      - name: unit_price
+        description: Unit price
+        expr: unit_price
+        data_type: NUMBER
+        default_aggregation: sum
 
 # ============================================================================
 # VERIFIED QUERIES - Pre-validated queries for common questions
 # ============================================================================
 verified_queries:
+  - name: thin_crust_vs_pan_performance
+    question: Compare thin-crust vs pan-pizza sales performance
+    sql: |
+      SELECT 
+        crust_type,
+        COUNT(DISTINCT order_id) as total_orders,
+        SUM(quantity) as units_sold,
+        SUM(line_total) as total_revenue,
+        AVG(line_total) as avg_revenue_per_item
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.V_ORDER_ITEMS
+      WHERE product_category = 'pizza'
+        AND order_date >= CURRENT_DATE() - 30
+      GROUP BY crust_type
+      ORDER BY total_revenue DESC
+
+  - name: thin_crust_sales_by_city
+    question: How are thin-crust pizza sales performing by city?
+    sql: |
+      SELECT 
+        city,
+        SUM(quantity) as units_sold,
+        SUM(line_total) as total_revenue,
+        COUNT(DISTINCT order_id) as orders_with_thin_crust
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.V_ORDER_ITEMS
+      WHERE crust_type = 'thin_crust'
+        AND order_date >= CURRENT_DATE() - 30
+      GROUP BY city
+      ORDER BY total_revenue DESC
+
   - name: daily_sales_summary
     question: What were our sales yesterday?
     sql: |
@@ -1036,4 +1280,103 @@ verified_queries:
       GROUP BY ingredient_category, ingredient_name
       ORDER BY wastage_cost DESC
       LIMIT 10
+
+  - name: thin_crust_chicago_analysis
+    question: Why did thin-crust sales dip in Chicago?
+    sql: |
+      WITH store_orders AS (
+        SELECT 
+          oi.store_name,
+          oi.city,
+          SUM(CASE WHEN oi.crust_type = 'thin_crust' THEN oi.quantity ELSE 0 END) as thin_crust_qty,
+          SUM(oi.quantity) as total_qty
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_ORDER_ITEMS oi
+        WHERE oi.city = 'Chicago'
+          AND oi.order_date >= CURRENT_DATE() - 7
+        GROUP BY oi.store_name, oi.city
+      ),
+      capacity_data AS (
+        SELECT 
+          store_name,
+          AVG(thin_crust_capacity_pct) as avg_thin_crust_capacity,
+          AVG(ovens_operational) as avg_ovens_operational,
+          MAX(downtime_reason) as downtime_reason
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_KITCHEN_CAPACITY
+        WHERE city = 'Chicago'
+          AND capacity_date >= CURRENT_DATE() - 7
+        GROUP BY store_name
+      )
+      SELECT 
+        so.store_name,
+        so.city,
+        so.thin_crust_qty,
+        so.total_qty,
+        cd.avg_thin_crust_capacity as thin_crust_capacity_pct,
+        cd.avg_ovens_operational as ovens_working,
+        cd.downtime_reason
+      FROM store_orders so
+      JOIN capacity_data cd ON so.store_name = cd.store_name
+      ORDER BY cd.avg_thin_crust_capacity ASC
+
+  - name: kitchen_capacity_by_city
+    question: Which cities have kitchen capacity issues affecting orders?
+    sql: |
+      SELECT 
+        kc.city,
+        kc.store_name,
+        AVG(kc.thin_crust_capacity_pct) as avg_thin_crust_capacity,
+        AVG(kc.ovens_operational) as avg_ovens_working,
+        MAX(kc.downtime_reason) as main_issue,
+        COUNT(DISTINCT o.order_id) as recent_orders
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.V_KITCHEN_CAPACITY kc
+      LEFT JOIN PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS o 
+        ON kc.store_id = o.store_id 
+        AND kc.capacity_date = o.order_date
+      WHERE kc.capacity_date >= CURRENT_DATE() - 7
+      GROUP BY kc.city, kc.store_name
+      HAVING AVG(kc.thin_crust_capacity_pct) < 70
+      ORDER BY avg_thin_crust_capacity ASC
+
+  - name: friday_capacity_demand_gap
+    question: Which stores had the biggest gap between demand and capacity last Friday?
+    sql: |
+      WITH friday_date AS (
+        SELECT DATEADD(day, -MOD(DAYOFWEEK(CURRENT_DATE()) + 2, 7), CURRENT_DATE()) as last_friday
+      ),
+      orders_by_store AS (
+        SELECT 
+          o.store_id,
+          s.store_name,
+          s.city,
+          COUNT(DISTINCT o.order_id) as order_count,
+          SUM(o.total_amount) as revenue
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_ORDERS o
+        JOIN PIZZA_INTELLIGENCE.ANALYTICS.DIM_STORES s ON o.store_id = s.store_id
+        WHERE o.order_date = (SELECT last_friday FROM friday_date)
+        GROUP BY o.store_id, s.store_name, s.city
+      ),
+      capacity_by_store AS (
+        SELECT 
+          store_id,
+          AVG(max_pizzas_per_hour) as avg_max_capacity,
+          AVG(actual_pizzas_made) as avg_actual_pizzas,
+          AVG(thin_crust_capacity_pct) as avg_thin_capacity,
+          MAX(downtime_reason) as main_issue
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_KITCHEN_CAPACITY
+        WHERE capacity_date = (SELECT last_friday FROM friday_date)
+        GROUP BY store_id
+      )
+      SELECT 
+        obs.store_name,
+        obs.city,
+        obs.order_count,
+        obs.revenue,
+        cbs.avg_max_capacity,
+        cbs.avg_actual_pizzas,
+        cbs.avg_thin_capacity as thin_crust_capacity_pct,
+        cbs.main_issue,
+        (cbs.avg_max_capacity - cbs.avg_actual_pizzas) as unused_capacity
+      FROM orders_by_store obs
+      LEFT JOIN capacity_by_store cbs ON obs.store_id = cbs.store_id
+      ORDER BY cbs.avg_thin_capacity ASC NULLS LAST
 

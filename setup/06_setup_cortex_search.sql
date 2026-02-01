@@ -132,7 +132,7 @@ SELECT document_id, document_type, document_title, store_id FROM PIZZA_DOCUMENTS
 CREATE OR REPLACE CORTEX SEARCH SERVICE PIZZA_INTELLIGENCE.DOCUMENTS.PIZZA_DOCUMENT_SEARCH
   ON content
   ATTRIBUTES document_type, document_title, store_id, document_date, summary
-  WAREHOUSE = CORTEX  -- Replace with your warehouse name
+  WAREHOUSE = COMPUTE_WH  -- Updated to COMPUTE_WH
   TARGET_LAG = '1 hour'
   AS (
     SELECT 

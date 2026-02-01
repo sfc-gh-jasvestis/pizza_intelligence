@@ -163,6 +163,46 @@ FROM FACT_CAMPAIGN_PERFORMANCE cp
 LEFT JOIN DIM_CAMPAIGNS ca ON cp.campaign_id = ca.campaign_id
 LEFT JOIN DIM_STORES s ON cp.store_id = s.store_id;
 
+-- ============================================================================
+-- Order Items View (with product and order details) - CRITICAL for product analysis
+-- ============================================================================
+CREATE OR REPLACE VIEW V_ORDER_ITEMS AS
+SELECT 
+    oi.order_item_id,
+    oi.order_id,
+    oi.product_id,
+    p.product_name,
+    p.category AS product_category,
+    p.subcategory AS crust_type,  -- thin_crust, pan, stuffed
+    p.size AS product_size,
+    p.base_price,
+    p.is_signature,
+    oi.quantity,
+    oi.unit_price,
+    oi.line_total,
+    oi.customizations,
+    -- Order context
+    o.order_date,
+    o.order_timestamp,
+    o.store_id,
+    s.store_name,
+    s.city,
+    s.state,
+    s.region,
+    o.order_channel,
+    o.order_type,
+    o.customer_id,
+    -- Calendar context
+    c.day_of_week,
+    c.is_weekend,
+    c.is_game_day,
+    c.weather_condition
+FROM FACT_ORDER_ITEMS oi
+LEFT JOIN DIM_PRODUCTS p ON oi.product_id = p.product_id
+LEFT JOIN FACT_ORDERS o ON oi.order_id = o.order_id
+LEFT JOIN DIM_STORES s ON o.store_id = s.store_id
+LEFT JOIN DIM_CALENDAR c ON o.order_date = c.date_key;
+
 -- Verify views
 SELECT 'Views created successfully!' AS status;
 SELECT 'V_ORDERS' AS view_name, COUNT(*) AS row_count FROM V_ORDERS
@@ -173,5 +213,7 @@ SELECT 'V_INVENTORY', COUNT(*) FROM V_INVENTORY
 UNION ALL
 SELECT 'V_STAFFING', COUNT(*) FROM V_STAFFING
 UNION ALL
-SELECT 'V_CAMPAIGN_PERFORMANCE', COUNT(*) FROM V_CAMPAIGN_PERFORMANCE;
+SELECT 'V_CAMPAIGN_PERFORMANCE', COUNT(*) FROM V_CAMPAIGN_PERFORMANCE
+UNION ALL
+SELECT 'V_ORDER_ITEMS', COUNT(*) FROM V_ORDER_ITEMS;
 
