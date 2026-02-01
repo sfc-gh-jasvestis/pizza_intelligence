@@ -64,7 +64,7 @@ DEMO_QUESTIONS = [
     },
     {
         "label": "Get ready for Friday",
-        "question": "What should I get ready for this Friday night shift? What were sales like last Friday and what's the weather forecast?",
+        "question": "What were my sales last Friday? How many orders did I get and what was the weather?",
         "icon": "calendar_today",
         "color": "blue",
         "type": "analyst"

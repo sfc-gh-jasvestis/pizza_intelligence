@@ -1199,9 +1199,72 @@ tables:
         default_aggregation: sum
 
 # ============================================================================
+# RELATIONSHIPS - Define how tables connect to each other
+# ============================================================================
+relationships:
+  - name: orders_to_order_items
+    left_table: orders
+    right_table: order_items
+    relationship_columns:
+      - left_column: order_id
+        right_column: order_id
+    join_type: one_to_many
+    relationship_type: one_to_many
+    
+  - name: orders_to_deliveries
+    left_table: orders
+    right_table: deliveries
+    relationship_columns:
+      - left_column: order_id
+        right_column: order_id
+    join_type: one_to_one
+    relationship_type: one_to_one
+    
+  - name: orders_to_kitchen_capacity
+    left_table: orders
+    right_table: kitchen_capacity
+    relationship_columns:
+      - left_column: store_id
+        right_column: store_id
+      - left_column: order_date
+        right_column: capacity_date
+    join_type: many_to_one
+    relationship_type: many_to_one
+    
+  - name: deliveries_to_kitchen_capacity
+    left_table: deliveries
+    right_table: kitchen_capacity
+    relationship_columns:
+      - left_column: store_id
+        right_column: store_id
+      - left_column: delivery_date
+        right_column: capacity_date
+    join_type: many_to_one
+    relationship_type: many_to_one
+
+# ============================================================================
 # VERIFIED QUERIES - Pre-validated queries for common questions
 # ============================================================================
 verified_queries:
+  - name: friday_shift_prep
+    question: What should I get ready for Friday night shift?
+    sql: |
+      SELECT 
+        store_name,
+        order_date,
+        DAYNAME(order_date) as day_of_week,
+        COUNT(*) as total_orders,
+        SUM(total_amount) as total_revenue,
+        AVG(total_amount) as avg_order_value,
+        weather_condition,
+        is_game_day
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.V_ORDERS
+      WHERE store_name = 'Chicago Loop'
+        AND DAYNAME(order_date) = 'Fri'
+        AND order_date >= CURRENT_DATE() - 14
+      GROUP BY store_name, order_date, weather_condition, is_game_day
+      ORDER BY order_date DESC
+
   - name: store_delivery_performance
     question: Show me delivery performance for a specific store like Chicago Loop
     sql: |
