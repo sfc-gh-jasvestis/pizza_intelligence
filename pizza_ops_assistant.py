@@ -46,29 +46,47 @@ SEARCH_SERVICE = "PIZZA_DOCUMENT_SEARCH"
 ANALYST_API_ENDPOINT = "/api/v2/cortex/analyst/message"
 API_TIMEOUT = 60000  # milliseconds
 
-# Sample questions for store managers - aligned with demo scenarios
-SAMPLE_QUESTIONS = {
-    ":red[:material/nightlight:] Last Night Analysis": {
-        "question": "Why were my sales lower than usual last night in this store?",
-        "type": "both"
-    },
-    ":orange[:material/calendar_today:] Friday Prep": {
-        "question": "What should I get ready for this Friday night shift? Given past Fridays, weather, and events, what do I need more of (staff, dough, riders) from 5-9pm?",
+# Demo questions for store managers - dramatic scenarios with our data
+DEMO_QUESTIONS = [
+    {
+        "label": "Why is my delivery performance so bad?",
+        "question": "Show me my delivery performance for the last 7 days. What percentage of deliveries were late and what's causing the delays?",
+        "icon": "local_shipping",
+        "color": "red",
         "type": "analyst"
     },
-    ":blue[:material/local_shipping:] Delivery Performance": {
-        "question": "Are my delivery times getting worse, and what's causing it? Compare my delivery performance this week vs last week.",
-        "type": "both"
+    {
+        "label": "What's wrong with my kitchen?",
+        "question": "What is my kitchen capacity right now and are there any equipment issues affecting my store?",
+        "icon": "kitchen",
+        "color": "orange",
+        "type": "analyst"
     },
-    ":green[:material/checklist:] Store Improvement": {
-        "question": "What are the top 3 things I should fix this week to improve my store score?",
-        "type": "both"
+    {
+        "label": "How much revenue am I losing?",
+        "question": "How much revenue is my store losing due to capacity constraints and late deliveries?",
+        "icon": "attach_money",
+        "color": "green",
+        "type": "analyst"
     },
-    ":violet[:material/rate_review:] Customer Sentiment": {
-        "question": "Show me my happiest and unhappiest customers from the last 7 days and what they mentioned.",
+    {
+        "label": "What are customers saying?",
+        "question": "What are customers complaining about in recent reviews for my store?",
+        "icon": "rate_review",
+        "color": "violet",
         "type": "search"
     },
-}
+    {
+        "label": "Compare me to other stores",
+        "question": "How does my store compare to other stores in terms of delivery performance and kitchen capacity?",
+        "icon": "compare",
+        "color": "blue",
+        "type": "analyst"
+    },
+]
+
+# Crisis stores for demo (to show dramatic data)
+CRISIS_STORES = ["Chicago Loop", "LA Downtown", "Manhattan Midtown", "Miami Beach"]
 
 
 # =============================================================================
@@ -588,7 +606,7 @@ def process_user_question(question: str, force_type: Optional[str] = None):
 def main():
     # Header
     st.title(":pizza: Pizza Ops Assistant")
-    st.caption("Your AI-powered assistant for pizza operations insights and customer feedback")
+    st.caption("Store Manager's AI Co-Pilot - Powered by Snowflake Cortex")
     
     # Initialize session state
     if "messages" not in st.session_state:
@@ -597,52 +615,105 @@ def main():
         st.session_state.processing = False
     if "pending_question" not in st.session_state:
         st.session_state.pending_question = None
+    if "selected_store" not in st.session_state:
+        st.session_state.selected_store = "Chicago Loop"
     
     # Ensure connection is established
     get_snowflake_connection()
     
-    # Sidebar with info
+    # Sidebar with store selector and demo questions
     with st.sidebar:
-        st.header("About")
-        st.markdown("""
-        This assistant uses **Snowflake Cortex** to answer 
-        natural language questions about your pizza operations.
+        st.header(":pizza: Store Manager View")
         
-        **Cortex Analyst** (structured data):
-        - Sales & Orders
-        - Delivery Performance
-        - Inventory Levels
-        - Staffing Data
-        - Campaign Performance
+        # Store selector
+        st.session_state.selected_store = st.selectbox(
+            "Select Your Store",
+            options=CRISIS_STORES + ["Chicago Wrigleyville", "Downtown Phoenix", "Naperville"],
+            index=0,
+            help="Demo tip: Select a crisis store (Chicago Loop, LA Downtown, Manhattan Midtown, Miami Beach) for dramatic results!"
+        )
         
-        **Cortex Search** (documents):
-        - Customer Reviews & Feedback
-        - Store Audit Reports
-        - Supplier Invoices
-        - Quality Issues
-        """)
+        # Show crisis indicator
+        if st.session_state.selected_store in CRISIS_STORES:
+            st.error(f"⚠️ **{st.session_state.selected_store}** is in CRISIS mode!")
+        else:
+            st.success(f"✅ **{st.session_state.selected_store}** is operating normally")
         
-        if st.button("Clear Chat", use_container_width=True):
+        st.divider()
+        
+        # Demo Questions section
+        st.subheader("🎯 Demo Questions")
+        st.caption("Click any question to ask the AI assistant")
+        
+        for i, q in enumerate(DEMO_QUESTIONS):
+            # Create colored button label
+            btn_label = f":{q['color']}[:material/{q['icon']}:] {q['label']}"
+            if st.button(btn_label, key=f"demo_q_{i}", use_container_width=True):
+                # Prepend store context to question
+                store_question = f"For {st.session_state.selected_store}: {q['question']}"
+                st.session_state.pending_question = store_question
+                st.session_state.pending_type = q.get("type")
+                st.rerun()
+        
+        st.divider()
+        
+        # Clear chat button
+        if st.button("🗑️ Clear Chat", use_container_width=True):
             st.session_state.messages = []
             st.session_state.processing = False
             st.rerun()
         
         st.divider()
-        st.caption(f"Semantic Model: `{SEMANTIC_MODEL_FILE}`")
-        st.caption(f"Search Service: `{SEARCH_SERVICE}`")
+        
+        # Info section
+        with st.expander("ℹ️ About this app"):
+            st.markdown("""
+            **Cortex Analyst** analyzes:
+            - Sales & Orders
+            - Delivery Performance
+            - Kitchen Capacity
+            - Staffing Data
+            
+            **Cortex Search** finds:
+            - Customer Reviews
+            - Equipment Reports
+            - Store Audits
+            """)
+            st.caption(f"Model: `{SEMANTIC_MODEL_FILE}`")
     
-    # Display suggestion pills for empty chat (only if not processing)
+    # Process pending question from sidebar
+    if st.session_state.pending_question:
+        question = st.session_state.pending_question
+        q_type = st.session_state.get("pending_type")
+        st.session_state.pending_question = None
+        st.session_state.pending_type = None
+        st.session_state.processing = True
+        process_user_question(question, q_type)
+        st.session_state.processing = False
+        st.rerun()
+    
+    # Main content area - show welcome message if no chat history
     if not st.session_state.messages and not st.session_state.processing:
-        st.markdown("**Try asking:**")
-        cols = st.columns(2)
-        questions = list(SAMPLE_QUESTIONS.items())
-        for i, (label, config) in enumerate(questions):
-            with cols[i % 2]:
-                if st.button(label, key=f"sample_{i}", use_container_width=True):
-                    st.session_state.processing = True
-                    process_user_question(config["question"], config.get("type"))
-                    st.session_state.processing = False
-                    st.rerun()
+        st.markdown(f"""
+        ### Welcome, {st.session_state.selected_store} Manager! 👋
+        
+        I'm your AI assistant powered by **Snowflake Cortex**. I can help you understand:
+        
+        - 📦 **Delivery Performance** - Are deliveries on time? What's causing delays?
+        - 🍕 **Kitchen Capacity** - Equipment status, production capacity
+        - 💰 **Revenue Impact** - How issues are affecting your bottom line
+        - 💬 **Customer Feedback** - What are customers saying about your store?
+        
+        **👈 Click a demo question in the sidebar** or type your own question below!
+        """)
+        
+        # Show quick stats for selected store
+        if st.session_state.selected_store in CRISIS_STORES:
+            st.warning(f"""
+            ⚠️ **Alert for {st.session_state.selected_store}:**
+            Your store is currently experiencing operational challenges. 
+            Use the demo questions to investigate!
+            """)
     
     # Display chat history
     for idx, message in enumerate(st.session_state.messages):

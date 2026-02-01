@@ -176,121 +176,127 @@ Add these 5 questions as "Suggested Questions" in the Pizza Ops Agent settings:
 
 > "Now let's see what this looks like for a store manager - someone who doesn't know SQL and just wants to run their store better."
 
-Open the Streamlit app (`pizza_ops_assistant.py`) or show the Manager's Co-Pilot UI.
+Open the Streamlit app at http://localhost:8502
 
 ---
 
-## Question 1: Last Night Analysis
+## App Features
+
+The Streamlit app has been designed for maximum demo impact:
+
+1. **Store Selector** (sidebar) - Select different stores to simulate different manager contexts
+2. **Crisis Indicator** - Shows ⚠️ when a crisis store is selected
+3. **Demo Question Buttons** - 5 one-click questions in the sidebar (always visible!)
+4. **Chat Interface** - Natural language conversation
+
+### Crisis Stores (for dramatic demo results):
+- **Chicago Loop** - 54% late deliveries, 50% oven capacity
+- **LA Downtown** - 64% late deliveries, traffic issues
+- **Manhattan Midtown** - 44% late deliveries
+- **Miami Beach** - 58% late deliveries
+
+---
+
+## Demo Question 1: Delivery Performance
+
+**Click the red button:** "Why is my delivery performance so bad?"
 
 ```
-Why were my sales lower than usual last night in this store?
+Show me my delivery performance for the last 7 days. What percentage of deliveries were late and what's causing the delays?
 ```
 
-**Alternative (pre-canned button):**
-> "Explain last night's dip for Store 42"
-
-**What It Demonstrates:**
-- Single-store focus
-- Historical comparison
-- Root cause for a specific shift
-
-**Expected Response:**
-Agent should analyze:
-- Comparison to same day last week
-- Any capacity or staffing issues
-- Weather or event factors
+**Expected Response (for Chicago Loop):**
+- 54% late delivery rate over 7 days
+- Main causes: "Extended prep time - equipment issues", "Order queue overflow"
+- Day-by-day breakdown showing consistent problems
 
 **Talking Point:**
-> "Store managers don't want to query across 50 stores - they want to understand THEIR store. The app automatically filters to their location."
+> "Store managers can immediately see their delivery crisis and the root causes - no SQL required."
 
 ---
 
-## Question 2: Friday Night Prep
+## Demo Question 2: Kitchen Capacity
+
+**Click the orange button:** "What's wrong with my kitchen?"
 
 ```
-What should I get ready for this Friday night shift?
+What is my kitchen capacity right now and are there any equipment issues affecting my store?
 ```
 
-**Alternative:**
-> "Given past Fridays, weather, and events, what do I need more of (staff, dough, riders) from 5-9pm?"
-
-**What It Demonstrates:**
-- Shift-level planning
-- Multi-factor forecasting
-- Actionable prep list
-
-**Expected Response:**
-Agent should provide:
-- Expected order volume (vs typical Friday)
-- Staffing recommendations
-- Dough prep targets
-- Any special events to prepare for
+**Expected Response (for Chicago Loop):**
+- Only 2 of 4 ovens operational (50% capacity!)
+- Issues: "Oven 2 repair pending", "Oven 3 temperature calibration issues"
+- Impact: "Thin-crust production limited due to oven temperature inconsistency"
 
 **Talking Point:**
-> "This is the 'what do I do' question every manager asks. Instead of gut feel, they get data-driven prep guidance."
+> "The manager instantly sees WHY deliveries are late - kitchen equipment issues causing cascade effects."
 
 ---
 
-## Question 3: Delivery Performance
+## Demo Question 3: Revenue Impact
+
+**Click the green button:** "How much revenue am I losing?"
 
 ```
-Are my delivery times getting worse, and what's causing it?
+How much revenue is my store losing due to capacity constraints and late deliveries?
 ```
 
-**Alternative:**
-> "Compare my delivery performance this week vs last week and tell me why it changed."
-
-**What It Demonstrates:**
-- Trend comparison
-- Root cause by factor
-- Actionable insights
-
-**Expected Response:**
-Agent should show:
-- Week-over-week delivery time comparison
-- Breakdown by reason (traffic, kitchen, riders)
-- Specific recommendations
-
----
-
-## Question 4: Store Improvement Priorities
-
-```
-What are the top 3 things I should fix this week to improve my store score?
-```
-
-**What It Demonstrates:**
-- KPI + complaint fusion
-- Prioritized recommendations
-- Actionable to-do list
-
-**Expected Response:**
-Agent should blend:
-- Operational KPIs (delivery time, order accuracy)
-- Customer complaints from reviews
-- Prioritized action items
+**Expected Response (for Chicago Loop):**
+- ~$2,300 in revenue impacted by late deliveries (17.5% of total)
+- 190 orders in the last 7 days
+- Connection to capacity constraints
 
 **Talking Point:**
-> "This is the Manager's Co-Pilot generating a personalized action plan. It's not just dashboards - it's a to-do list powered by AI."
+> "Now the manager can quantify the problem in dollars - this is what gets attention from regional managers."
 
 ---
 
-## Question 5: Customer Sentiment
+## Demo Question 4: Customer Feedback (Cortex Search)
+
+**Click the violet button:** "What are customers saying?"
 
 ```
-Show me my happiest and unhappiest customers from the last 7 days and what they mentioned.
+What are customers complaining about in recent reviews for my store?
 ```
 
 **What It Demonstrates:**
-- Customer-level sentiment
-- Review summarization
-- Feedback categorization
+- **Cortex Search** (not Analyst) - searches unstructured documents
+- Customer reviews, complaints, feedback
+- Semantic understanding of sentiment
+
+**Talking Point:**
+> "This switches to our document search service - same interface, different AI capability under the hood."
+
+---
+
+## Demo Question 5: Store Comparison
+
+**Click the blue button:** "Compare me to other stores"
+
+```
+How does my store compare to other stores in terms of delivery performance and kitchen capacity?
+```
 
 **Expected Response:**
-Agent should:
-- Identify 5-star vs 1-2 star reviews
-- Summarize what made customers happy/unhappy
-- Highlight specific issues mentioned
+| Store | Late % | Status |
+|-------|--------|--------|
+| LA Downtown | 63.9% | WORST |
+| Miami Beach | 58.1% | Crisis |
+| Chicago Loop | 54.0% | Crisis |
+| Manhattan Midtown | 44.2% | Struggling |
+| Downtown Phoenix | 13.5% | Good |
+
+**Talking Point:**
+> "Managers can benchmark against peers - and see they're not alone in struggling, or learn from top performers."
+
+---
+
+## Pro Tips for Demo
+
+1. **Start with Chicago Loop** - It has the most dramatic data
+2. **Switch stores mid-demo** - Show how the context changes
+3. **Try a custom question** - Ask something not pre-canned to show flexibility
+4. **Point out the sidebar** - Demo questions are always one-click away
 
 ---
 
