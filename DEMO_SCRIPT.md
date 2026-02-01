@@ -199,16 +199,16 @@ The Streamlit app has been designed for maximum demo impact:
 
 ## Demo Question 1: Delivery Performance
 
-**Click the red button:** "Why is my delivery performance so bad?"
+**Click the red button:** "Why is delivery so bad?"
 
 ```
-Show me my delivery performance for the last 7 days. What percentage of deliveries were late and what's causing the delays?
+Are my delivery times getting worse, and what's causing it? Compare this week vs last week.
 ```
 
 **Expected Response (for Chicago Loop):**
-- 54% late delivery rate over 7 days
+- 54% late delivery rate this week
 - Main causes: "Extended prep time - equipment issues", "Order queue overflow"
-- Day-by-day breakdown showing consistent problems
+- Week-over-week comparison showing the trend
 
 **Talking Point:**
 > "Store managers can immediately see their delivery crisis and the root causes - no SQL required."
@@ -233,31 +233,37 @@ What is my kitchen capacity right now and are there any equipment issues affecti
 
 ---
 
-## Demo Question 3: Revenue Impact
+## Demo Question 3: Friday Prep
 
-**Click the green button:** "How much revenue am I losing?"
+**Click the blue button:** "Get ready for Friday"
 
 ```
-How much revenue is my store losing due to capacity constraints and late deliveries?
+What should I get ready for this Friday night shift? What were sales like last Friday and what's the weather forecast?
 ```
 
 **Expected Response (for Chicago Loop):**
-- ~$2,300 in revenue impacted by late deliveries (17.5% of total)
-- 190 orders in the last 7 days
-- Connection to capacity constraints
+- Last Friday: 55 orders, cold weather
+- Historical patterns for Friday nights
+- Prep recommendations based on past data
 
 **Talking Point:**
-> "Now the manager can quantify the problem in dollars - this is what gets attention from regional managers."
+> "This is the 'what do I do' question every manager asks. Instead of gut feel, they get data-driven prep guidance."
 
 ---
 
-## Demo Question 4: Customer Feedback (Cortex Search)
+## Demo Question 4: Customer Complaints (Cortex Search)
 
-**Click the violet button:** "What are customers saying?"
+**Click the violet button:** "Unhappy customers?"
 
 ```
-What are customers complaining about in recent reviews for my store?
+Show me customer complaints and negative feedback for my store. What are people unhappy about?
 ```
+
+**Expected Response (for Chicago Loop):**
+- "Pizza arrived an hour late, completely cold. WORST experience ever."
+- "Third late delivery this month. Switching to Crispy Crust."
+- Mentions of I-90 construction affecting delivery times
+- Thin crust quality complaints
 
 **What It Demonstrates:**
 - **Cortex Search** (not Analyst) - searches unstructured documents
@@ -265,16 +271,16 @@ What are customers complaining about in recent reviews for my store?
 - Semantic understanding of sentiment
 
 **Talking Point:**
-> "This switches to our document search service - same interface, different AI capability under the hood."
+> "This switches to our document search service - same interface, different AI capability under the hood. Real customer voices, not just numbers."
 
 ---
 
 ## Demo Question 5: Store Comparison
 
-**Click the blue button:** "Compare me to other stores"
+**Click the green button:** "How do I compare?"
 
 ```
-How does my store compare to other stores in terms of delivery performance and kitchen capacity?
+How does my store compare to other stores in terms of delivery performance and late delivery rates?
 ```
 
 **Expected Response:**

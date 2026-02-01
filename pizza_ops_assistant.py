@@ -46,11 +46,11 @@ SEARCH_SERVICE = "PIZZA_DOCUMENT_SEARCH"
 ANALYST_API_ENDPOINT = "/api/v2/cortex/analyst/message"
 API_TIMEOUT = 60000  # milliseconds
 
-# Demo questions for store managers - dramatic scenarios with our data
+# Demo questions for store managers - focused on day-to-day operations
 DEMO_QUESTIONS = [
     {
-        "label": "Why is my delivery performance so bad?",
-        "question": "Show me my delivery performance for the last 7 days. What percentage of deliveries were late and what's causing the delays?",
+        "label": "Why is delivery so bad?",
+        "question": "Are my delivery times getting worse, and what's causing it? Compare this week vs last week.",
         "icon": "local_shipping",
         "color": "red",
         "type": "analyst"
@@ -63,24 +63,24 @@ DEMO_QUESTIONS = [
         "type": "analyst"
     },
     {
-        "label": "How much revenue am I losing?",
-        "question": "How much revenue is my store losing due to capacity constraints and late deliveries?",
-        "icon": "attach_money",
-        "color": "green",
+        "label": "Get ready for Friday",
+        "question": "What should I get ready for this Friday night shift? What were sales like last Friday and what's the weather forecast?",
+        "icon": "calendar_today",
+        "color": "blue",
         "type": "analyst"
     },
     {
-        "label": "What are customers saying?",
-        "question": "What are customers complaining about in recent reviews for my store?",
-        "icon": "rate_review",
+        "label": "Unhappy customers?",
+        "question": "Show me customer complaints and negative feedback for my store. What are people unhappy about?",
+        "icon": "sentiment_dissatisfied",
         "color": "violet",
         "type": "search"
     },
     {
-        "label": "Compare me to other stores",
-        "question": "How does my store compare to other stores in terms of delivery performance and kitchen capacity?",
+        "label": "How do I compare?",
+        "question": "How does my store compare to other stores in terms of delivery performance and late delivery rates?",
         "icon": "compare",
-        "color": "blue",
+        "color": "green",
         "type": "analyst"
     },
 ]
