@@ -39,114 +39,127 @@ Open [ai.snowflake.com](https://ai.snowflake.com) and select the **Pizza Ops Age
 
 ---
 
-## Question 1: Capacity Gap Analysis (THE KEY DEMO MOMENT)
+## Question 1: Capacity Gap Analysis (THE KEY DEMO MOMENT) 🔥🔥🔥
 
 ```
-Across all stores last Friday, which cities saw the biggest gap between order demand and kitchen capacity, and why?
+Show me the capacity gap by city for last Friday
 ```
 
 **What It Demonstrates:**
-- Multi-table joins (orders + kitchen capacity + deliveries + events)
-- Cross-city comparison
-- Root cause identification
+- Multi-table joins (orders + kitchen capacity + stores)
+- Cross-city comparison with dramatic contrast
+- Equipment issue identification
 
 **Expected Response:**
-Agent should identify Chicago Loop with:
-- 45% thin-crust capacity (vs 90%+ elsewhere)
-- Only 2 of 4 ovens operational
-- Main issue: "Oven 2 repair pending, Oven 3 temperature calibration issues"
+Agent should show Chicago at **45% thin-crust capacity** while all other cities are at 85-98%:
+- Chicago: 45% capacity, 3 ovens working (out of 4)
+- Equipment issues: "Oven 2 repair pending, Oven 3 temperature calibration issues"
+- All other cities: 85-98% capacity, 4 ovens operational
 
 **Talking Point:**
-> "Notice how the agent combined order data, kitchen capacity, and operational context to find not just WHAT happened but WHY. This query would have taken a BI analyst hours to build manually."
+> "Notice the dramatic gap - Chicago is operating at HALF capacity while everywhere else runs smoothly. This isn't just data, it's an urgent operational alert."
 
 ---
 
-## Question 2: Leading Indicator Analysis
+## Question 2: Late Delivery Analysis 🔥🔥
 
 ```
-Show me stores where delivery time has been worsening over the last 4 Fridays but revenue hasn't dropped yet. What's driving the delay risk?
+Which stores had the highest late delivery rates last Friday and what were the main causes?
 ```
 
 **What It Demonstrates:**
-- Trend analysis over time
-- Leading vs lagging indicator detection
-- Proactive risk identification
+- Delivery performance metrics
+- Root cause analysis
+- Store-level comparison
 
 **Expected Response:**
-Agent should analyze:
-- Week-over-week delivery time trends
-- Revenue stability despite service degradation
-- Root causes (rider shortage, traffic, kitchen delays)
+Agent should identify:
+- Scottsdale North: 16.7% late rate (highest)
+- Santa Monica: 11.1% late rate  
+- Naperville: 10.5% late rate
+- Main cause: Traffic across all locations
 
 **Talking Point:**
-> "This is proactive intelligence - finding problems BEFORE they hit the bottom line. Traditional BI shows you the fire after the house burns down. This shows you the smoke."
+> "The agent doesn't just show WHICH stores have problems - it tells you WHY. Traffic is the common thread, which points to route optimization opportunities."
 
 ---
 
-## Question 3: Product Channel Analysis
+## Question 3: Product Channel Analysis 🔥🔥
 
 ```
-Compare thin-crust vs pan-pizza performance across channels (app vs in-store vs aggregators) over the last 8 weeks and explain the main trends.
+Compare thin-crust vs pan-pizza performance across channels over the last 8 weeks
 ```
 
 **What It Demonstrates:**
-- Product mix analysis
-- Channel performance comparison
-- Trend explanation with context
+- Product mix analysis by channel
+- Revenue comparison
+- Channel strategy insights
 
 **Expected Response:**
 Agent should show:
-- Thin-crust vs pan performance by channel
-- Aggregator channel trends (third-party apps)
-- Possible explanations (competitor activity, weather, promotions)
+- Thin-crust dominates **in-store** ($93K revenue)
+- Pan pizza dominates **web** ($59K) and **phone** ($38K)
+- App channel underperforming for both
 
 **Talking Point:**
-> "Partners building QSR intelligence need to understand not just what's selling, but WHERE and WHY. This is the kind of analysis that informs menu strategy and channel investments."
+> "This reveals a strategic insight - thin-crust customers prefer dining in, while pan-pizza customers order remotely. This affects how you design menus and promotions by channel."
 
 ---
 
-## Question 4: Predictive Recommendations
+## Question 4: Revenue at Risk Analysis 🔥🔥🔥
 
 ```
-Using order history, weather, and local events, which 10 stores are most at risk of stock-outs this coming Friday, and what should their target dough prep be?
+How much revenue is Chicago losing due to kitchen capacity issues?
 ```
 
 **What It Demonstrates:**
-- Multi-source predictive analytics
-- Actionable recommendations
-- Operational prescriptions
+- Financial impact quantification
+- Capacity-to-revenue correlation
+- Urgency for equipment repair
 
 **Expected Response:**
-Agent should:
-- Rank stores by stock-out risk
-- Factor in weather forecast and events
-- Provide specific dough prep targets
+Agent should calculate:
+- Chicago Loop: **$11,000+ estimated lost revenue** from oven issues
+- 45% capacity = 55% production lost
+- Direct link to equipment problems
 
 **Talking Point:**
-> "This is the Future Pizza Prophecy - the agent doesn't just describe the past, it prescribes action for the future. This is where partner IP becomes incredibly valuable."
+> "This is the CFO question - 'What's it costing us?' Now we have a number: $11K per month. That's the business case for emergency oven repair."
 
 ---
 
-## Question 5: Unstructured + Structured Fusion
+## Question 5: Complaint Themes + Operations Fusion 🔥🔥
 
 ```
-For our top 50 stores by revenue, summarize the most common complaint themes in reviews from the past month and map them to operational issues (delivery, quality, pricing).
+Summarize customer complaint themes from recent reviews and map them to operational issues
 ```
 
 **What It Demonstrates:**
-- Cortex Search for unstructured documents
-- Cortex Analyst for structured rankings
-- Theme extraction and categorization
+- **Cortex Search** for unstructured documents (reviews, feedback)
+- **Cortex Analyst** for structured metrics
+- Multi-tool orchestration
 
 **Expected Response:**
 Agent should:
-- Identify top stores by revenue
-- Search customer reviews and feedback
-- Categorize complaints into operational buckets
-- Highlight Chicago Loop quality issues and competitor mentions
+- Search customer reviews and feedback documents
+- Identify complaint themes (delivery delays, quality, pricing)
+- Map to operational metrics (late rates, capacity issues)
+- Highlight Chicago equipment issues and competitor mentions
 
 **Talking Point:**
-> "This is the magic of multi-tool orchestration. The agent queried structured sales data AND searched through unstructured customer reviews to connect financial performance with customer sentiment. No manual report could do this in real-time."
+> "This is the magic - the agent queried structured delivery data AND searched through unstructured customer reviews to connect operations with sentiment. No dashboard can do this."
+
+---
+
+## Suggested Questions for SI UI
+
+Add these 5 questions as "Suggested Questions" in the Pizza Ops Agent settings:
+
+1. Show me the capacity gap by city for last Friday
+2. Which stores had the highest late delivery rates last Friday and what were the main causes?
+3. Compare thin-crust vs pan-pizza performance across channels over the last 8 weeks
+4. How much revenue is Chicago losing due to kitchen capacity issues?
+5. Summarize customer complaint themes from recent reviews and map them to operational issues
 
 ---
 
