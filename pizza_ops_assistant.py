@@ -48,48 +48,42 @@ ANALYST_API_ENDPOINT = "/api/v2/cortex/analyst/message"
 API_TIMEOUT = 60000  # milliseconds
 
 # Demo questions for store managers - aligned with repo showcase
+# Mix: 3 "both" (Analyst+Search), 1 pure "analyst", 1 pure "search"
 DEMO_QUESTIONS = [
     {
         "label": "Why were sales low?",
         "question": "Why were my sales lower than usual last night in this store?",
         "icon": "trending_down",
         "color": "red",
-        "type": "analyst"
+        "type": "both"  # Sales data + customer feedback from search
     },
     {
-        "label": "Get ready for Friday",
-        "question": "What should I get ready for this Friday night shift?",
-        "icon": "calendar_today",
+        "label": "Prep for busy weekend",
+        "question": "What should I expect this Friday? How many orders do we typically get on Friday nights and what was last Friday's revenue?",
+        "icon": "inventory_2",
         "color": "blue",
-        "type": "analyst"
+        "type": "both"  # Friday forecast + inventory docs + events calendar
     },
     {
-        "label": "Delivery getting worse?",
+        "label": "Delivery performance",
         "question": "Show me my delivery performance by week for the last month",
         "icon": "local_shipping",
         "color": "orange",
-        "type": "analyst"
+        "type": "analyst"  # Pure metrics/charts demo
     },
     {
         "label": "Top fixes this week",
         "question": "What are the top things I should fix this week to improve operations?",
         "icon": "build",
         "color": "violet",
-        "type": "analyst"
+        "type": "both"  # Performance metrics + audit documents
     },
     {
-        "label": "Happy & unhappy customers",
-        "question": "Show me my happiest and unhappiest customers from the last 7 days and what they mentioned.",
+        "label": "Customer feedback",
+        "question": "What are customers saying about us? Show me recent reviews - both the happy ones and complaints.",
         "icon": "sentiment_satisfied",
         "color": "green",
-        "type": "search"
-    },
-    {
-        "label": "Prep for busy weekend",
-        "question": "When was the last store audit? What do I need to order from suppliers? Are there any games this weekend?",
-        "icon": "inventory_2",
-        "color": "blue",
-        "type": "search"
+        "type": "search"  # Pure document search demo
     },
 ]
 
@@ -262,6 +256,78 @@ IMPORTANT:
         return None
     except Exception as e:
         st.warning(f"Could not generate recommendations: {e}")
+        return None
+
+
+def generate_combined_insights(question: str, sql_results: str, documents: list, store_name: str) -> str:
+    """
+    Generate unified insights combining structured data and document findings.
+    Used for "both" type queries that leverage Cortex Analyst AND Cortex Search.
+    """
+    conn = get_snowflake_connection()
+    
+    # Prepare data summary
+    data_summary = sql_results if sql_results else "No structured data available."
+    
+    # Prepare document summaries
+    doc_summaries = []
+    for doc in documents[:5]:
+        title = doc.get('DOCUMENT_TITLE', 'Untitled')
+        doc_type = doc.get('DOCUMENT_TYPE', 'document')
+        content = doc.get('CONTENT', '')[:1500]
+        summary = doc.get('SUMMARY', '')
+        doc_summaries.append(f"- [{doc_type.upper()}] {title}\n  {summary}\n  Key content: {content}")
+    
+    docs_text = "\n".join(doc_summaries) if doc_summaries else "No relevant documents found."
+    
+    prompt = f"""You are an AI assistant for a pizza store manager at {store_name}.
+The manager asked: "{question}"
+
+You have TWO sources of information:
+
+**1. STRUCTURED DATA (from database):**
+{data_summary}
+
+**2. DOCUMENTS (from search):**
+{docs_text}
+
+Provide a UNIFIED answer that combines insights from both sources in this format:
+
+📊 **Data Summary:**
+[Summarize what the numbers/data show - be specific with metrics]
+
+📋 **Document Insights:**
+[Key findings from relevant documents - inventory needs, calendar events, audit findings, etc.]
+
+🎯 **Recommended Actions:**
+1. [Action based on data]
+2. [Action based on documents]
+3. [Additional action if needed]
+
+IMPORTANT:
+- Combine insights from BOTH data and documents
+- Be specific with numbers, dates, and item names
+- If the question has multiple parts, answer ALL of them
+- Keep total response under 250 words"""
+
+    escaped_prompt = prompt.replace("'", "''").replace("\\", "\\\\")
+    
+    try:
+        sql = f"""
+            SELECT SNOWFLAKE.CORTEX.COMPLETE(
+                'claude-3-5-sonnet',
+                '{escaped_prompt}'
+            ) as response
+        """
+        result = conn.session().sql(sql).collect()
+        
+        if result and len(result) > 0:
+            response = result[0]['RESPONSE']
+            response = response.replace("$", "\\$")
+            return response
+        return None
+    except Exception as e:
+        st.warning(f"Could not generate combined insights: {e}")
         return None
 
 
@@ -799,8 +865,8 @@ def display_sql_results(sql: str) -> str:
         
         st.success(f"Found {len(df)} row(s)")
         
-        # Create tabs for different views
-        if len(df) > 1 and len(df.columns) >= 2:
+        # Create tabs for different views - only show chart tab if enough data points
+        if len(df) >= 3 and len(df.columns) >= 2:
             tab_data, tab_chart = st.tabs(["📊 Data", "📈 Chart"])
             
             with tab_data:
@@ -809,7 +875,12 @@ def display_sql_results(sql: str) -> str:
             with tab_chart:
                 # Auto-select chart type based on data
                 numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-                if numeric_cols and len(numeric_cols) >= 1:
+                
+                # Filter out non-meaningful columns for charting
+                skip_columns = ['priority', 'rank', 'id', 'index', 'row', 'num', 'number']
+                chartable_cols = [c for c in numeric_cols if not any(skip in c.lower() for skip in skip_columns)]
+                
+                if chartable_cols and len(chartable_cols) >= 1:
                     x_col = df.columns[0]  # First column is usually the category/date
                     
                     # Smart column selection based on column names
@@ -820,26 +891,28 @@ def display_sql_results(sql: str) -> str:
                         ('%', '#E74C3C'),         # Red for percentages (usually problems)
                         ('rate', '#E74C3C'),      # Red for rates
                         ('late', '#E74C3C'),      # Red for late
+                        ('time', '#9B59B6'),      # Purple for time
+                        ('deliver', '#3498DB'),   # Blue for deliveries
                     ]
                     
                     y_col = None
                     chart_color = '#3498DB'  # Default blue
                     
                     for keyword, color in priority_keywords:
-                        matching = [c for c in numeric_cols if keyword in c.lower()]
+                        matching = [c for c in chartable_cols if keyword in c.lower()]
                         if matching:
                             y_col = matching[0]
                             chart_color = color
                             break
                     
-                    # Fallback to first numeric column
+                    # Fallback to first chartable column
                     if not y_col:
-                        y_col = numeric_cols[0]
+                        y_col = chartable_cols[0]
                     
                     st.bar_chart(df, x=x_col, y=y_col, color=chart_color)
                     st.caption(f"📊 {y_col} by {x_col}")
                 else:
-                    st.info("No numeric data available for charting.")
+                    st.info("This data is best viewed as a table.")
                     st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.dataframe(df, use_container_width=True, hide_index=True)
@@ -910,11 +983,16 @@ def process_user_question(question: str, force_type: Optional[str] = None):
                     })
         
         elif query_type == "both":
-            # Answer with both data and documents
-            st.info("Looking at both data and documents for a complete answer...")
+            # Answer with both data and documents - the power combo!
+            st.info("🔍 Combining data analysis with document search...")
             
-            # First, get structured data
-            with st.spinner("Analyzing data..."):
+            sql_results_text = ""
+            sql_statement = None
+            analyst_content = []
+            results = []
+            
+            # First, get structured data from Cortex Analyst
+            with st.spinner("📊 Analyzing structured data..."):
                 try:
                     api_messages = [{
                         "role": "user",
@@ -929,27 +1007,71 @@ def process_user_question(question: str, force_type: Optional[str] = None):
                     else:
                         analyst_content = message_obj.get("content", [])
                     
-                    st.markdown("### Data Analysis")
-                    sql_statement = display_message_content(analyst_content, len(st.session_state.messages))
+                    # Extract SQL and execute to get results for LLM context
+                    for item in analyst_content:
+                        if isinstance(item, dict) and item.get("type") == "sql":
+                            sql_statement = item.get("statement", "")
+                            if sql_statement:
+                                try:
+                                    df = execute_sql(sql_statement)
+                                    if not df.empty:
+                                        sql_results_text = df.to_string(index=False)
+                                except Exception:
+                                    pass
+                            break
+                        elif isinstance(item, dict) and item.get("type") == "text":
+                            sql_results_text += item.get("text", "") + "\n"
+                    
+                    # Display data section
+                    st.markdown("### 📊 Data Analysis")
+                    display_message_content(analyst_content, len(st.session_state.messages))
                     if sql_statement:
                         display_sql_results(sql_statement)
                         
                 except Exception as e:
                     st.warning(f"Could not get data analysis: {e}")
-                    analyst_content = []
-                    sql_statement = None
             
             # Then, search documents for context
-            with st.spinner("Searching related documents..."):
+            with st.spinner("📋 Searching related documents..."):
                 try:
-                    results = search_documents(question, limit=3)
+                    # Expand search query with topic-relevant keywords for better doc matching
+                    search_query = question
+                    question_lower = question.lower()
+                    
+                    # For weekend/Friday prep questions, add inventory and events keywords
+                    if any(word in question_lower for word in ['friday', 'weekend', 'prep', 'prepare', 'busy']):
+                        search_query = question + " inventory order restock events games calendar weekend prep"
+                    # For operations/fixes questions, add audit keywords
+                    elif any(word in question_lower for word in ['fix', 'improve', 'operations', 'issues']):
+                        search_query = question + " audit findings issues maintenance equipment"
+                    # For sales questions, add customer feedback
+                    elif any(word in question_lower for word in ['sales', 'revenue', 'lower', 'down']):
+                        search_query = question + " customer review feedback complaints"
+                    
+                    results = search_documents(search_query, limit=5)
                     if results:
-                        st.markdown("### Related Documents")
-                        response_text = format_search_results(results, question)
-                        st.markdown(response_text)
+                        st.markdown("### 📋 Related Documents Found")
+                        doc_types = set(doc.get('DOCUMENT_TYPE', '') for doc in results)
+                        st.caption(f"Found {len(results)} relevant documents: {', '.join(filter(None, doc_types))}")
                 except Exception as e:
                     st.warning(f"Could not search documents: {e}")
                     results = []
+            
+            # Generate unified insights combining both sources
+            combined_insights = None
+            if sql_results_text or results:
+                with st.spinner("🎯 Generating unified recommendations..."):
+                    store_name = st.session_state.get("selected_store", "your store")
+                    combined_insights = generate_combined_insights(
+                        question, 
+                        sql_results_text, 
+                        results, 
+                        store_name
+                    )
+                    if combined_insights:
+                        st.divider()
+                        st.markdown("### 🎯 Combined Analysis & Recommendations")
+                        st.markdown(combined_insights)
             
             # Store combined response
             st.session_state.messages.append({
@@ -957,7 +1079,8 @@ def process_user_question(question: str, force_type: Optional[str] = None):
                 "content": analyst_content,
                 "query_type": "both",
                 "sql": sql_statement,
-                "documents": results if 'results' in dir() else [],
+                "documents": results,
+                "recommendations": combined_insights,
             })
         
         else:
@@ -1565,13 +1688,20 @@ def main():
                         # Display combined results
                         sql = message.get("sql")
                         documents = message.get("documents", [])
-                        st.markdown("### Data Analysis")
+                        recommendations = message.get("recommendations")
+                        
+                        st.markdown("### 📊 Data Analysis")
                         display_message_content(content, idx)
                         if sql:
                             display_sql_results(sql)
                         if documents:
-                            st.markdown("### Related Documents")
-                            st.markdown(format_search_results(documents, ""))
+                            st.markdown("### 📋 Related Documents Found")
+                            doc_types = set(doc.get('DOCUMENT_TYPE', '') for doc in documents)
+                            st.caption(f"Found {len(documents)} relevant documents: {', '.join(filter(None, doc_types))}")
+                        if recommendations:
+                            st.divider()
+                            st.markdown("### 🎯 Combined Analysis & Recommendations")
+                            st.markdown(recommendations)
                     else:
                         # Display analyst results
                         sql = display_message_content(content, idx)

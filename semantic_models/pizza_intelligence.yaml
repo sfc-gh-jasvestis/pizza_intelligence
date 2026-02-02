@@ -1240,6 +1240,38 @@ verified_queries:
       GROUP BY order_date, weather_condition, is_game_day, game_event
       ORDER BY order_date ASC
 
+  - name: friday_night_forecast
+    question: "For Chicago Loop: How many orders do we typically get on Friday nights? What was our revenue last Friday?"
+    verified_by: Jonathan Vestin
+    verified_at: 1737500000
+    sql: |
+      WITH friday_stats AS (
+        SELECT 
+          order_date,
+          COUNT(*) as orders,
+          SUM(total_amount) as revenue
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_ORDERS
+        WHERE store_name = 'Chicago Loop'
+          AND DAYNAME(order_date) = 'Fri'
+          AND order_date >= CURRENT_DATE() - 60
+        GROUP BY order_date
+      ),
+      last_friday AS (
+        SELECT MAX(order_date) as last_fri FROM friday_stats
+      )
+      SELECT 
+        'Typical Friday' as "Period",
+        ROUND(AVG(orders)) as "Orders",
+        ROUND(AVG(revenue), 0) as "Revenue ($)"
+      FROM friday_stats
+      UNION ALL
+      SELECT 
+        'Last Friday (' || TO_CHAR(last_fri, 'Mon DD') || ')' as "Period",
+        orders as "Orders",
+        ROUND(revenue, 0) as "Revenue ($)"
+      FROM friday_stats, last_friday
+      WHERE order_date = last_fri
+
   - name: delivery_trend_analysis
     question: "For Chicago Loop: Show me my delivery performance by week for the last month"
     verified_by: Jonathan Vestin
