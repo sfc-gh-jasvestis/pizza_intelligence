@@ -12,6 +12,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import json
+import numpy as np
 from typing import Dict, List, Optional, Any
 
 # =============================================================================
@@ -46,47 +47,51 @@ SEARCH_SERVICE = "PIZZA_DOCUMENT_SEARCH"
 ANALYST_API_ENDPOINT = "/api/v2/cortex/analyst/message"
 API_TIMEOUT = 60000  # milliseconds
 
-# Demo questions for store managers - focused on day-to-day operations
+# Demo questions for store managers - aligned with repo showcase
 DEMO_QUESTIONS = [
     {
-        "label": "Why is delivery so bad?",
-        "question": "Are my delivery times getting worse, and what's causing it? Compare this week vs last week.",
-        "icon": "local_shipping",
+        "label": "Why were sales low?",
+        "question": "Why were my sales lower than usual last night in this store?",
+        "icon": "trending_down",
         "color": "red",
         "type": "analyst"
     },
     {
-        "label": "What's wrong with my kitchen?",
-        "question": "What is my kitchen capacity right now and are there any equipment issues affecting my store?",
-        "icon": "kitchen",
-        "color": "orange",
-        "type": "analyst"
-    },
-    {
         "label": "Get ready for Friday",
-        "question": "What were my sales last Friday? How many orders did I get and what was the weather?",
+        "question": "What should I get ready for this Friday night shift?",
         "icon": "calendar_today",
         "color": "blue",
         "type": "analyst"
     },
     {
-        "label": "Unhappy customers?",
-        "question": "Show me customer complaints and negative feedback for my store. What are people unhappy about?",
-        "icon": "sentiment_dissatisfied",
+        "label": "Delivery getting worse?",
+        "question": "Show me my delivery performance by week for the last month",
+        "icon": "local_shipping",
+        "color": "orange",
+        "type": "analyst"
+    },
+    {
+        "label": "Top fixes this week",
+        "question": "What are the top things I should fix this week to improve operations?",
+        "icon": "build",
         "color": "violet",
+        "type": "analyst"
+    },
+    {
+        "label": "Happy & unhappy customers",
+        "question": "Show me my happiest and unhappiest customers from the last 7 days and what they mentioned.",
+        "icon": "sentiment_satisfied",
+        "color": "green",
         "type": "search"
     },
     {
-        "label": "How do I compare?",
-        "question": "How does my store compare to other stores in terms of delivery performance and late delivery rates?",
-        "icon": "compare",
-        "color": "green",
-        "type": "analyst"
+        "label": "Prep for busy weekend",
+        "question": "When was the last store audit? What do I need to order from suppliers? Are there any games this weekend?",
+        "icon": "inventory_2",
+        "color": "blue",
+        "type": "search"
     },
 ]
-
-# Crisis stores for demo (to show dramatic data)
-CRISIS_STORES = ["Chicago Loop", "LA Downtown", "Manhattan Midtown", "Miami Beach"]
 
 
 # =============================================================================
@@ -177,10 +182,85 @@ Keep it brief and actionable. No more than 100 words total."""
         result = conn.session().sql(sql).collect()
         
         if result and len(result) > 0:
-            return result[0]['RESPONSE']
+            response = result[0]['RESPONSE']
+            # Escape $ signs to prevent LaTeX rendering in Streamlit
+            response = response.replace("$", "\\$")
+            return response
         return None
     except Exception as e:
         # Log error for debugging but don't break the app
+        st.warning(f"Could not generate recommendations: {e}")
+        return None
+
+
+def generate_feedback_insights(question: str, documents: list, store_name: str) -> str:
+    """
+    Use Cortex LLM to generate actionable recommendations for store managers
+    based on customer feedback and documents from Cortex Search.
+    """
+    if not documents:
+        return None
+        
+    conn = get_snowflake_connection()
+    
+    # Summarize the documents for the LLM - include more content for better answers
+    doc_summaries = []
+    for doc in documents[:5]:  # Use up to 5 docs
+        title = doc.get('DOCUMENT_TITLE', 'Untitled')
+        doc_type = doc.get('DOCUMENT_TYPE', 'document')
+        date = doc.get('DOCUMENT_DATE', 'Unknown')
+        content = doc.get('CONTENT', '')[:2000]  # More content for context
+        summary = doc.get('SUMMARY', '')
+        doc_summaries.append(f"- [{doc_type.upper()}] {title} (Date: {date})\n  {summary}\n  Content: {content}")
+    
+    docs_text = "\n".join(doc_summaries)
+    
+    prompt = f"""You are a helpful assistant for a pizza store manager at {store_name}.
+The manager asked: "{question}"
+
+Based on the following documents, DIRECTLY ANSWER their question first, then provide recommendations.
+
+Relevant documents:
+{docs_text}
+
+Provide your response in this exact format:
+
+📋 **Direct Answer:**
+[Answer the manager's specific question(s) directly using information from the documents. If they asked multiple things, answer each one clearly.]
+
+📊 **Key Insight:** [One sentence summary of the main finding]
+
+✅ **Recommended Actions:**
+1. [First specific action]
+2. [Second specific action]
+3. [Third specific action if needed]
+
+IMPORTANT: 
+- Answer their EXACT questions first (e.g., if they asked about last audit date, tell them the date)
+- If they asked for a list (like items to order), provide that list
+- If they asked about events/games, check the calendar documents and tell them
+- Be specific with dates, numbers, and items from the documents
+- Keep total response under 200 words."""
+
+    # Escape single quotes for SQL
+    escaped_prompt = prompt.replace("'", "''").replace("\\", "\\\\")
+    
+    try:
+        sql = f"""
+            SELECT SNOWFLAKE.CORTEX.COMPLETE(
+                'claude-3-5-sonnet',
+                '{escaped_prompt}'
+            ) as response
+        """
+        result = conn.session().sql(sql).collect()
+        
+        if result and len(result) > 0:
+            response = result[0]['RESPONSE']
+            # Escape $ signs to prevent LaTeX rendering in Streamlit
+            response = response.replace("$", "\\$")
+            return response
+        return None
+    except Exception as e:
         st.warning(f"Could not generate recommendations: {e}")
         return None
 
@@ -205,7 +285,12 @@ def detect_query_type(question: str) -> str:
         'mention', 'mentions', 'mentioned', 'comment', 'comments',
         'sentiment', 'opinion', 'quote', 'invoice', 'invoices',
         'supplier', 'quality issue', 'quality issues', 'document',
-        'report', 'crispy crust', 'competitor', 'competitors'
+        'report', 'crispy crust', 'competitor', 'competitors',
+        # New keywords for inventory/calendar queries
+        'order from supplier', 'need to order', 'reorder', 'restock',
+        'ingredient', 'ingredients', 'kitchen', 'par level', 'par levels',
+        'calendar', 'game', 'games', 'event', 'events', 'bulls', 'super bowl',
+        'weekend', 'upcoming', 'maintenance', 'equipment'
     ]
     
     # Keywords that suggest structured data analysis
@@ -327,22 +412,43 @@ def search_documents(query: str, limit: int = 5) -> List[Dict]:
     stop_words = {'what', 'are', 'the', 'about', 'this', 'that', 'with', 'from', 
                   'they', 'have', 'been', 'were', 'saying', 'customers', 'does',
                   'said', 'tell', 'show', 'find', 'search', 'look', 'give', 'any',
-                  'pizza', 'store', 'stores', 'our', 'their', 'customer'}
+                  'pizza', 'store', 'stores', 'our', 'their', 'customer', 'last',
+                  'days', 'week', 'month', 'mentioned', 'for', 'chicago', 'loop',
+                  'when', 'was', 'time', 'ran', 'all', 'provide', 'list', 'need',
+                  'check', 'see', 'can', 'you', 'please', 'also', 'and', 'do', 'me'}
     
-    key_terms = [term.lower().strip('?.,!') for term in query.split() 
-                 if len(term) > 2 and term.lower() not in stop_words]
+    # Priority terms that should always be included in search if found in query
+    priority_terms = {'audit', 'inventory', 'ingredient', 'ingredients', 'supplier', 
+                      'suppliers', 'order', 'reorder', 'game', 'games', 'weekend',
+                      'calendar', 'event', 'events', 'kitchen', 'stock', 'bulls',
+                      'review', 'feedback', 'invoice'}
+    
+    # First, check for priority terms in the query
+    query_lower = query.lower()
+    key_terms = []
+    
+    # Add priority terms first
+    for pt in priority_terms:
+        if pt in query_lower:
+            key_terms.append(pt)
+    
+    # Then add other significant terms from the query
+    for term in query.split():
+        clean_term = term.lower().strip('?.,!')
+        if len(clean_term) > 2 and clean_term not in stop_words and clean_term not in key_terms:
+            key_terms.append(clean_term)
     
     if not key_terms:
         # Return all documents if no good search terms
         search_sql = f"""
         SELECT 
-            document_id,
-            document_type,
-            document_title,
-            document_date,
-            store_id,
-            summary,
-            content
+            DOCUMENT_ID,
+            DOCUMENT_TYPE,
+            DOCUMENT_TITLE,
+            DOCUMENT_DATE,
+            STORE_ID,
+            SUMMARY,
+            CONTENT
         FROM {SEARCH_DATABASE}.{SEARCH_SCHEMA}.PIZZA_DOCUMENTS
         LIMIT {limit}
         """
@@ -351,19 +457,21 @@ def search_documents(query: str, limit: int = 5) -> List[Dict]:
         score_parts = []
         conditions = []
         
-        # Check for compound terms like "thin crust" -> also search "thin-crust"
-        for i, term in enumerate(key_terms[:5]):
+        # Use up to 10 key terms for better matching
+        for i, term in enumerate(key_terms[:10]):
             safe_term = term.replace("'", "''")
-            # Score for exact term match
-            score_parts.append(f"CASE WHEN LOWER(content) LIKE '%{safe_term}%' THEN 2 ELSE 0 END")
+            # Score for exact term match - boost content matches
+            score_parts.append(f"CASE WHEN LOWER(content) LIKE '%{safe_term}%' THEN 3 ELSE 0 END")
             score_parts.append(f"CASE WHEN LOWER(summary) LIKE '%{safe_term}%' THEN 1 ELSE 0 END")
+            score_parts.append(f"CASE WHEN LOWER(document_title) LIKE '%{safe_term}%' THEN 2 ELSE 0 END")
             conditions.append(f"LOWER(content) LIKE '%{safe_term}%'")
             conditions.append(f"LOWER(summary) LIKE '%{safe_term}%'")
+            conditions.append(f"LOWER(document_title) LIKE '%{safe_term}%'")
             
             # Also check for hyphenated version with next term (e.g., thin-crust)
             if i < len(key_terms) - 1:
                 compound = f"{safe_term}-{key_terms[i+1].replace(chr(39), chr(39)+chr(39))}"
-                score_parts.append(f"CASE WHEN LOWER(content) LIKE '%{compound}%' THEN 5 ELSE 0 END")
+                score_parts.append(f"CASE WHEN LOWER(CONTENT) LIKE '%{compound}%' THEN 5 ELSE 0 END")
         
         score_calc = " + ".join(score_parts)
         where_clause = " OR ".join(conditions)
@@ -371,52 +479,234 @@ def search_documents(query: str, limit: int = 5) -> List[Dict]:
         search_sql = f"""
         WITH scored_docs AS (
             SELECT 
-                document_id,
-                document_type,
-                document_title,
-                document_date,
-                store_id,
-                summary,
-                content,
-                ({score_calc}) AS relevance_score
+                DOCUMENT_ID,
+                DOCUMENT_TYPE,
+                DOCUMENT_TITLE,
+                DOCUMENT_DATE,
+                STORE_ID,
+                SUMMARY,
+                CONTENT,
+                ({score_calc}) AS RELEVANCE_SCORE
             FROM {SEARCH_DATABASE}.{SEARCH_SCHEMA}.PIZZA_DOCUMENTS
             WHERE {where_clause}
         )
         SELECT * FROM scored_docs
-        WHERE relevance_score >= 4
-        ORDER BY relevance_score DESC
+        WHERE RELEVANCE_SCORE >= 1
+        ORDER BY RELEVANCE_SCORE DESC, DOCUMENT_DATE DESC
         LIMIT {limit}
         """
     
     try:
         df = conn.query(search_sql)
-        return df.to_dict('records')
+        results = df.to_dict('records')
+        return results
     except Exception as e:
-        st.error(f"Document search failed: {e}")
-        return []
+        # Try reconnecting
+        try:
+            if "snowflake_conn" in st.session_state:
+                del st.session_state.snowflake_conn
+            conn = get_snowflake_connection()
+            df = conn.query(search_sql)
+            return df.to_dict('records')
+        except Exception as retry_error:
+            st.error(f"Document search failed: {retry_error}")
+            return []
 
 
-def format_search_results(results: List[Dict], query: str) -> str:
-    """Format search results into a readable response."""
+def format_search_results(results: List[Dict], query: str, show_documents: bool = False) -> str:
+    """Format search results into a readable response.
+    
+    Args:
+        results: List of document results from Cortex Search
+        query: The user's query
+        show_documents: If True, show document details. If False, just acknowledge what was found.
+    """
     if not results:
         return f"I couldn't find any documents matching '{query}'. Try rephrasing your question or ask about specific topics like reviews, audits, or invoices."
     
-    response_parts = [f"I found **{len(results)} relevant document(s)** related to your question:\n"]
+    # Check if this is a happy/unhappy customers query
+    is_customer_query = any(word in query.lower() for word in ['happy', 'unhappy', 'customer', 'review', 'feedback'])
     
-    for i, doc in enumerate(results, 1):
-        doc_type = doc.get('DOCUMENT_TYPE', 'document').title()
+    if is_customer_query:
+        return format_customer_reviews(results, query)
+    
+    # For non-customer queries, just provide a brief acknowledgment
+    # The recommendations will provide the actual insights
+    doc_types = set()
+    for doc in results:
+        doc_type = doc.get('DOCUMENT_TYPE', 'document')
+        if doc_type:
+            doc_types.add(doc_type.lower())
+    
+    type_str = ", ".join(sorted(doc_types)) if doc_types else "documents"
+    response = f"I found **{len(results)} relevant document(s)** ({type_str}) to help answer your question."
+    
+    # Optionally show document details
+    if show_documents:
+        response_parts = [response, "\n"]
+        for i, doc in enumerate(results, 1):
+            doc_type = doc.get('DOCUMENT_TYPE', 'document').title()
+            title = doc.get('DOCUMENT_TITLE', 'Untitled')
+            date = doc.get('DOCUMENT_DATE', 'Unknown date')
+            store = doc.get('STORE_ID', 'All stores')
+            summary = doc.get('SUMMARY', '')
+            
+            response_parts.append(f"### {i}. {title}")
+            response_parts.append(f"**Type:** {doc_type} | **Date:** {date} | **Store:** {store}")
+            if summary:
+                response_parts.append(f"\n> {summary}\n")
+            response_parts.append("---")
+        return "\n".join(response_parts)
+    
+    return response
+
+
+def format_customer_reviews(results: List[Dict], query: str) -> str:
+    """Format customer reviews with clear happy/unhappy sections."""
+    import re
+    
+    response_parts = ["## 📋 Customer Feedback Summary\n"]
+    response_parts.append(f"Found **{len(results)} review(s)** from recent customer feedback:\n")
+    
+    happy_reviews = []
+    unhappy_reviews = []
+    
+    for doc in results:
         title = doc.get('DOCUMENT_TITLE', 'Untitled')
-        date = doc.get('DOCUMENT_DATE', 'Unknown date')
-        store = doc.get('STORE_ID', 'All stores')
+        content = doc.get('CONTENT', '')
         summary = doc.get('SUMMARY', '')
+        doc_date = doc.get('DOCUMENT_DATE', 'Unknown')
         
-        response_parts.append(f"### {i}. {title}")
-        response_parts.append(f"**Type:** {doc_type} | **Date:** {date} | **Store:** {store}")
-        if summary:
-            response_parts.append(f"\n> {summary}\n")
-        response_parts.append("---")
+        # Use content if available, otherwise summary
+        text_to_parse = content if content else summary
+        
+        if not text_to_parse:
+            continue
+        
+        # Split into sections based on headers
+        # Look for HAPPIEST/POSITIVE and UNHAPPIEST/NEGATIVE sections
+        happy_section = ""
+        unhappy_section = ""
+        
+        # Find happy section
+        happy_patterns = [
+            r'HAPPIEST CUSTOMERS.*?(?=UNHAPPIEST|NEGATIVE|WEEKLY|$)',
+            r'POSITIVE REVIEWS.*?(?=NEGATIVE|UNHAPPIEST|Daily|$)',
+            r'HAPPY:.*?(?=UNHAPPY|$)',
+        ]
+        for pattern in happy_patterns:
+            match = re.search(pattern, text_to_parse, re.DOTALL | re.IGNORECASE)
+            if match:
+                happy_section = match.group(0)
+                break
+        
+        # Find unhappy section
+        unhappy_patterns = [
+            r'UNHAPPIEST CUSTOMERS.*?(?=WEEKLY|TOP ISSUES|$)',
+            r'NEGATIVE REVIEWS.*?(?=Daily|WEEKLY|$)',
+            r'UNHAPPY:.*?$',
+        ]
+        for pattern in unhappy_patterns:
+            match = re.search(pattern, text_to_parse, re.DOTALL | re.IGNORECASE)
+            if match:
+                unhappy_section = match.group(0)
+                break
+        
+        # Parse individual reviews from happy section
+        if happy_section:
+            reviews = parse_review_section(happy_section, 'happy', doc_date)
+            happy_reviews.extend(reviews)
+        
+        # Parse individual reviews from unhappy section
+        if unhappy_section:
+            reviews = parse_review_section(unhappy_section, 'unhappy', doc_date)
+            unhappy_reviews.extend(reviews)
+    
+    # Display Happy Customers
+    response_parts.append("### 😊 Happy Customers\n")
+    if happy_reviews:
+        for i, review in enumerate(happy_reviews[:5], 1):
+            name = review.get('name', 'Anonymous')
+            rating = review.get('rating', '5')
+            comment = review.get('comment', '')
+            date = review.get('date', '')
+            
+            stars = int(rating) if rating.isdigit() else 5
+            rating_stars = '⭐' * stars
+            date_str = f" ({date})" if date else ""
+            response_parts.append(f"**{i}. {name}**{date_str} {rating_stars}")
+            response_parts.append(f"> _{comment}_\n")
+    else:
+        response_parts.append("_No specific happy customer reviews found in recent feedback._\n")
+    
+    # Display Unhappy Customers
+    response_parts.append("### 😞 Unhappy Customers\n")
+    if unhappy_reviews:
+        for i, review in enumerate(unhappy_reviews[:5], 1):
+            name = review.get('name', 'Anonymous')
+            rating = review.get('rating', '1')
+            comment = review.get('comment', '')
+            date = review.get('date', '')
+            
+            stars = int(rating) if rating.isdigit() else 1
+            rating_stars = '⭐' * stars
+            date_str = f" ({date})" if date else ""
+            response_parts.append(f"**{i}. {name}**{date_str} {rating_stars}")
+            response_parts.append(f"> ⚠️ _{comment}_\n")
+    else:
+        response_parts.append("_No specific unhappy customer reviews found in recent feedback._\n")
     
     return "\n".join(response_parts)
+
+
+def parse_review_section(section: str, sentiment: str, doc_date: str) -> List[Dict]:
+    """Parse individual reviews from a section of text."""
+    import re
+    reviews = []
+    
+    # Pattern: "Name X. (Date, N stars):" or "Name X. (Date):" followed by quoted text
+    # Examples: 
+    #   Sarah M. (Jan 30): "Best deep dish..."
+    #   Robert H. (Jan 30, 2 stars): "Waited 55 minutes..."
+    #   Tom B. (5 stars): "Perfect late-night..."
+    
+    # Main pattern - capture name, metadata, and quoted comment
+    pattern = r'([A-Z][a-z]+\s+[A-Z]\.?)\s*\(([^)]+)\):\s*"([^"]+)"'
+    
+    matches = re.findall(pattern, section)
+    
+    for match in matches:
+        name = match[0].strip()
+        meta = match[1].strip()  # Could be "Jan 30" or "Jan 30, 2 stars" or "5 stars"
+        comment = match[2].strip()
+        
+        # Extract rating from meta if present
+        rating_match = re.search(r'(\d)\s*star', meta, re.IGNORECASE)
+        if rating_match:
+            rating = rating_match.group(1)
+        else:
+            rating = '5' if sentiment == 'happy' else '2'
+        
+        # Extract date from meta if present
+        date_match = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\d+', meta, re.IGNORECASE)
+        if date_match:
+            review_date = date_match.group(0)
+        else:
+            review_date = doc_date
+        
+        reviews.append({
+            'name': name,
+            'rating': rating,
+            'comment': comment,
+            'date': review_date
+        })
+    
+    return reviews
+
+
+def extract_individual_reviews(text: str, sentiment: str) -> List[Dict]:
+    """Extract individual customer reviews from text - legacy function."""
+    return parse_review_section(text, sentiment, '')
 
 
 # =============================================================================
@@ -441,7 +731,21 @@ def display_message_content(content: List[Dict], message_index: int) -> Optional
     """
     sql_statement = None
     
+    # Handle case where content is a string instead of list
+    if isinstance(content, str):
+        st.markdown(content)
+        return None
+    
+    # Handle empty or None content
+    if not content:
+        return None
+    
     for item in content:
+        # Skip if item is not a dict (defensive)
+        if not isinstance(item, dict):
+            st.markdown(str(item))
+            continue
+            
         content_type = item.get("type")
         
         if content_type == "text":
@@ -489,13 +793,15 @@ def display_sql_results(sql: str) -> str:
         with st.spinner("Running query..."):
             df = execute_sql(sql)
         
-        if df.empty:
+        if df is None or df.empty:
             st.info("Query returned no results.")
             return None
-            
+        
+        st.success(f"Found {len(df)} row(s)")
+        
         # Create tabs for different views
         if len(df) > 1 and len(df.columns) >= 2:
-            tab_data, tab_chart = st.tabs(["Data", "Chart"])
+            tab_data, tab_chart = st.tabs(["📊 Data", "📈 Chart"])
             
             with tab_data:
                 st.dataframe(df, use_container_width=True, hide_index=True)
@@ -503,12 +809,37 @@ def display_sql_results(sql: str) -> str:
             with tab_chart:
                 # Auto-select chart type based on data
                 numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-                if numeric_cols:
-                    # Use first column as x-axis, first numeric as y
-                    x_col = df.columns[0]
-                    y_col = numeric_cols[0] if df.columns[0] not in numeric_cols else numeric_cols[-1]
-                    st.bar_chart(df, x=x_col, y=y_col)
+                if numeric_cols and len(numeric_cols) >= 1:
+                    x_col = df.columns[0]  # First column is usually the category/date
+                    
+                    # Smart column selection based on column names
+                    # Priority: Revenue > Orders > Late% > other metrics
+                    priority_keywords = [
+                        ('revenue', '#2ECC71'),   # Green for money
+                        ('order', '#3498DB'),     # Blue for orders  
+                        ('%', '#E74C3C'),         # Red for percentages (usually problems)
+                        ('rate', '#E74C3C'),      # Red for rates
+                        ('late', '#E74C3C'),      # Red for late
+                    ]
+                    
+                    y_col = None
+                    chart_color = '#3498DB'  # Default blue
+                    
+                    for keyword, color in priority_keywords:
+                        matching = [c for c in numeric_cols if keyword in c.lower()]
+                        if matching:
+                            y_col = matching[0]
+                            chart_color = color
+                            break
+                    
+                    # Fallback to first numeric column
+                    if not y_col:
+                        y_col = numeric_cols[0]
+                    
+                    st.bar_chart(df, x=x_col, y=y_col, color=chart_color)
+                    st.caption(f"📊 {y_col} by {x_col}")
                 else:
+                    st.info("No numeric data available for charting.")
                     st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.dataframe(df, use_container_width=True, hide_index=True)
@@ -544,18 +875,30 @@ def process_user_question(question: str, force_type: Optional[str] = None):
             # Use Cortex Search for document queries
             with st.spinner("Searching documents..."):
                 try:
-                    results = search_documents(question, limit=3)
+                    results = search_documents(question, limit=5)
                     response_text = format_search_results(results, question)
                     
                     # Display results
                     display_search_content(response_text, results, len(st.session_state.messages))
                     
-                    # Store assistant response
+                    # Generate recommendations from feedback
+                    store_name = st.session_state.get("selected_store", "your store")
+                    insights = None
+                    if results:
+                        with st.spinner("Generating recommendations..."):
+                            insights = generate_feedback_insights(question, results, store_name)
+                            if insights:
+                                st.divider()
+                                st.markdown("### 💡 Answer & Recommendations")
+                                st.markdown(insights)
+                    
+                    # Store assistant response WITH recommendations
                     st.session_state.messages.append({
                         "role": "assistant",
                         "content": [{"type": "text", "text": response_text}],
                         "query_type": "search",
                         "documents": results,
+                        "recommendations": insights,
                     })
                     
                 except Exception as e:
@@ -578,7 +921,13 @@ def process_user_question(question: str, force_type: Optional[str] = None):
                         "content": [{"type": "text", "text": question}]
                     }]
                     response = send_analyst_message(api_messages)
-                    analyst_content = response.get("message", {}).get("content", [])
+                    
+                    # Extract response content with safety checks
+                    message_obj = response.get("message", {})
+                    if isinstance(message_obj, str):
+                        analyst_content = [{"type": "text", "text": message_obj}]
+                    else:
+                        analyst_content = message_obj.get("content", [])
                     
                     st.markdown("### Data Analysis")
                     sql_statement = display_message_content(analyst_content, len(st.session_state.messages))
@@ -619,15 +968,26 @@ def process_user_question(question: str, force_type: Optional[str] = None):
                     api_messages = []
                     for msg in st.session_state.messages:
                         if msg.get("query_type") != "search":  # Only include analyst messages
+                            # Ensure content is in proper format for API
+                            msg_content = msg["content"]
+                            if isinstance(msg_content, str):
+                                msg_content = [{"type": "text", "text": msg_content}]
+                            elif not isinstance(msg_content, list):
+                                msg_content = [{"type": "text", "text": str(msg_content)}]
+                            
                             api_messages.append({
                                 "role": msg["role"] if msg["role"] != "assistant" else "analyst",
-                                "content": msg["content"]
+                                "content": msg_content
                             })
                     
                     response = send_analyst_message(api_messages)
                     
-                    # Extract response content
-                    analyst_content = response.get("message", {}).get("content", [])
+                    # Extract response content with safety checks
+                    message_obj = response.get("message", {})
+                    if isinstance(message_obj, str):
+                        analyst_content = [{"type": "text", "text": message_obj}]
+                    else:
+                        analyst_content = message_obj.get("content", [])
                     request_id = response.get("request_id")
                     
                     # Display the response
@@ -642,6 +1002,7 @@ def process_user_question(question: str, force_type: Optional[str] = None):
                     
                     # Generate manager insights/recommendations
                     store_name = st.session_state.get("selected_store", "your store")
+                    insights = None
                     if data_summary:
                         with st.spinner("Generating recommendations..."):
                             insights = generate_manager_insights(question, data_summary, store_name)
@@ -651,18 +1012,18 @@ def process_user_question(question: str, force_type: Optional[str] = None):
                                 st.markdown(insights)
                             else:
                                 st.info("Could not generate recommendations for this query.")
-                    else:
-                        # Debug: show why no recommendations
-                        if sql_statement:
-                            st.caption("No data returned from query - cannot generate recommendations.")
+                    elif sql_statement:
+                        # SQL exists but no data returned
+                        st.warning("⚠️ Query returned no data. Try adjusting your question or date range.")
                     
-                    # Store assistant response
+                    # Store assistant response WITH recommendations
                     st.session_state.messages.append({
                         "role": "analyst",
                         "content": analyst_content,
                         "request_id": request_id,
                         "sql": sql_statement,
                         "query_type": "analyst",
+                        "recommendations": insights,  # Store recommendations!
                     })
                     
                 except Exception as e:
@@ -672,6 +1033,376 @@ def process_user_question(question: str, force_type: Optional[str] = None):
                         "content": [{"type": "text", "text": f"Sorry, I encountered an error: {e}"}],
                         "query_type": "analyst",
                     })
+
+
+# =============================================================================
+# DASHBOARD FUNCTIONS - Traffic Map & Weather
+# =============================================================================
+
+# Store coordinates for map centering (Chicago Loop only)
+STORE_COORDINATES = {
+    "Chicago Loop": {"lat": 41.8819, "lon": -87.6278},
+}
+
+WEATHER_ICONS = {
+    "sunny": "☀️",
+    "clear": "☀️",
+    "cold": "❄️",
+    "snowy": "🌨️",
+    "rainy": "🌧️",
+    "hot": "🌡️",
+    "mild": "🌤️",
+    "cloudy": "☁️",
+}
+
+def get_delivery_map_data(store_name: str) -> pd.DataFrame:
+    """Get delivery data with generated coordinates for mapping."""
+    conn = get_snowflake_connection()
+    
+    # Get store center coordinates
+    store_coords = STORE_COORDINATES.get(store_name, {"lat": 41.8819, "lon": -87.6278})
+    
+    sql = f"""
+    SELECT 
+        delivery_id,
+        delivery_date,
+        delivery_duration_min,
+        is_late,
+        late_minutes,
+        late_reason,
+        weather_condition,
+        delivery_distance_km,
+        customer_rating
+    FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
+    WHERE store_name = '{store_name}'
+      AND delivery_date >= CURRENT_DATE() - 7
+    ORDER BY delivery_date DESC
+    LIMIT 100
+    """
+    
+    df = conn.query(sql)
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    # Generate coordinates around store center based on delivery distance
+    np.random.seed(42)  # For consistent demo results
+    n = len(df)
+    
+    # Spread deliveries based on distance (further = more spread)
+    distance_factor = df['DELIVERY_DISTANCE_KM'].fillna(3) / 10
+    
+    # Random angle for each delivery
+    angles = np.random.uniform(0, 2 * np.pi, n)
+    
+    # Calculate lat/lon offsets (roughly 0.01 degree = 1km)
+    lat_offsets = distance_factor * np.sin(angles) * 0.01
+    lon_offsets = distance_factor * np.cos(angles) * 0.01
+    
+    df['lat'] = store_coords['lat'] + lat_offsets
+    df['lon'] = store_coords['lon'] + lon_offsets
+    
+    return df
+
+
+def get_weather_stats(store_name: str) -> dict:
+    """Get current weather and its impact on deliveries."""
+    conn = get_snowflake_connection()
+    
+    sql = f"""
+    SELECT 
+        weather_condition,
+        COUNT(*) as total_deliveries,
+        SUM(CASE WHEN is_late THEN 1 ELSE 0 END) as late_deliveries,
+        ROUND(AVG(delivery_duration_min), 1) as avg_duration,
+        ROUND(AVG(CASE WHEN is_late THEN late_minutes ELSE 0 END), 1) as avg_delay
+    FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
+    WHERE store_name = '{store_name}'
+      AND delivery_date = CURRENT_DATE() - 1
+    GROUP BY weather_condition
+    ORDER BY total_deliveries DESC
+    LIMIT 1
+    """
+    
+    df = conn.query(sql)
+    
+    if df.empty:
+        # Get most recent weather if no data for yesterday
+        sql2 = f"""
+        SELECT 
+            weather_condition,
+            COUNT(*) as total_deliveries,
+            SUM(CASE WHEN is_late THEN 1 ELSE 0 END) as late_deliveries,
+            ROUND(AVG(delivery_duration_min), 1) as avg_duration
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
+        WHERE store_name = '{store_name}'
+          AND delivery_date >= CURRENT_DATE() - 7
+        GROUP BY weather_condition
+        ORDER BY total_deliveries DESC
+        LIMIT 1
+        """
+        df = conn.query(sql2)
+    
+    if df.empty:
+        return {
+            "condition": "unknown",
+            "icon": "❓",
+            "total": 0,
+            "late": 0,
+            "late_pct": 0,
+            "avg_duration": 0
+        }
+    
+    row = df.iloc[0]
+    condition = str(row['WEATHER_CONDITION']).lower()
+    
+    return {
+        "condition": condition.title(),
+        "icon": WEATHER_ICONS.get(condition, "🌡️"),
+        "total": int(row['TOTAL_DELIVERIES']),
+        "late": int(row['LATE_DELIVERIES']),
+        "late_pct": round(row['LATE_DELIVERIES'] / row['TOTAL_DELIVERIES'] * 100, 1) if row['TOTAL_DELIVERIES'] > 0 else 0,
+        "avg_duration": float(row['AVG_DURATION'])
+    }
+
+
+def get_traffic_hotspots(store_name: str) -> pd.DataFrame:
+    """Get aggregated traffic delay hotspots."""
+    conn = get_snowflake_connection()
+    
+    sql = f"""
+    SELECT 
+        late_reason,
+        COUNT(*) as count,
+        ROUND(AVG(late_minutes), 1) as avg_delay,
+        ROUND(AVG(delivery_duration_min), 1) as avg_duration
+    FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
+    WHERE store_name = '{store_name}'
+      AND delivery_date >= CURRENT_DATE() - 7
+      AND is_late = TRUE
+    GROUP BY late_reason
+    ORDER BY count DESC
+    """
+    
+    return conn.query(sql)
+
+
+def get_delivery_stats(store_name: str) -> dict:
+    """Get quick delivery stats for dashboard."""
+    conn = get_snowflake_connection()
+    
+    sql = f"""
+    SELECT 
+        COUNT(*) as total_deliveries,
+        SUM(CASE WHEN is_late THEN 1 ELSE 0 END) as late_deliveries,
+        ROUND(AVG(delivery_duration_min), 1) as avg_duration,
+        ROUND(AVG(customer_rating), 1) as avg_rating
+    FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
+    WHERE store_name = '{store_name}'
+      AND delivery_date >= CURRENT_DATE() - 7
+    """
+    
+    df = conn.query(sql)
+    
+    if df.empty:
+        return {"total": 0, "late": 0, "late_pct": 0, "avg_duration": 0, "avg_rating": 0}
+    
+    row = df.iloc[0]
+    total = int(row['TOTAL_DELIVERIES']) if row['TOTAL_DELIVERIES'] else 0
+    late = int(row['LATE_DELIVERIES']) if row['LATE_DELIVERIES'] else 0
+    
+    return {
+        "total": total,
+        "late": late,
+        "late_pct": round(late / total * 100, 1) if total > 0 else 0,
+        "avg_duration": float(row['AVG_DURATION']) if row['AVG_DURATION'] else 0,
+        "avg_rating": float(row['AVG_RATING']) if row['AVG_RATING'] else 0
+    }
+
+
+def render_dashboard(store_name: str):
+    """Render the traffic map and weather dashboard."""
+    
+    # Quick Stats Row
+    st.subheader("📊 Last 7 Days Overview")
+    stats = get_delivery_stats(store_name)
+    weather = get_weather_stats(store_name)
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        st.metric("Total Deliveries", stats['total'])
+    with col2:
+        st.metric("Late Deliveries", stats['late'], f"{stats['late_pct']}%")
+    with col3:
+        st.metric("Avg Delivery Time", f"{stats['avg_duration']} min")
+    with col4:
+        st.metric("Avg Rating", f"⭐ {stats['avg_rating']}")
+    with col5:
+        st.metric("Weather", f"{weather['icon']} {weather['condition']}")
+    
+    st.divider()
+    
+    # Map and Details in two columns
+    map_col, details_col = st.columns([2, 1])
+    
+    with map_col:
+        st.subheader("🗺️ Delivery Traffic Map")
+        
+        # Get delivery data with coordinates
+        map_data = get_delivery_map_data(store_name)
+        
+        if not map_data.empty:
+            # Separate on-time and late deliveries for display
+            late_deliveries = map_data[map_data['IS_LATE'] == True]
+            ontime_deliveries = map_data[map_data['IS_LATE'] == False]
+            
+            # View selector
+            view_option = st.radio(
+                "Filter deliveries:",
+                ["All Deliveries", "Late Only", "On-Time Only"],
+                horizontal=True,
+                key="map_view_selector"
+            )
+            
+            # Filter data based on selection
+            if view_option == "Late Only":
+                display_data = late_deliveries
+                map_color = '#ff4444'
+            elif view_option == "On-Time Only":
+                display_data = ontime_deliveries
+                map_color = '#44ff44'
+            else:
+                display_data = map_data
+                map_color = '#4444ff'
+            
+            # Store the filtered data in session state for the breakdown
+            st.session_state.filtered_deliveries = display_data
+            
+            if not display_data.empty:
+                st.map(display_data[['lat', 'lon']], zoom=12, color=map_color)
+                st.caption(f"Showing {len(display_data)} deliveries")
+            else:
+                st.info(f"No {view_option.lower().replace(' only', '')} deliveries to show.")
+            
+            # Summary stats below map
+            st.markdown("---")
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                st.metric("📍 Total Shown", len(display_data))
+            with col_b:
+                traffic_delays = len(display_data[display_data['LATE_REASON'] == 'traffic']) if not display_data.empty else 0
+                st.metric("🚗 Traffic", traffic_delays)
+            with col_c:
+                weather_delays = len(display_data[display_data['LATE_REASON'] == 'weather']) if not display_data.empty else 0
+                st.metric("🌧️ Weather", weather_delays)
+        else:
+            st.info("No delivery data available for mapping.")
+            st.session_state.filtered_deliveries = pd.DataFrame()
+    
+    with details_col:
+        # Use filtered data if available
+        filtered_data = st.session_state.get('filtered_deliveries', pd.DataFrame())
+        view_option = st.session_state.get('map_view_selector', 'All Deliveries')
+        
+        if view_option == "Late Only":
+            # LATE ONLY VIEW: Show delay breakdown by reason
+            st.subheader("⚠️ Delay Breakdown")
+            
+            if not filtered_data.empty and 'LATE_REASON' in filtered_data.columns:
+                breakdown = filtered_data.groupby('LATE_REASON').agg({
+                    'DELIVERY_ID': 'count',
+                    'LATE_MINUTES': 'mean'
+                }).reset_index()
+                breakdown.columns = ['LATE_REASON', 'COUNT', 'AVG_DELAY']
+                breakdown = breakdown.sort_values('COUNT', ascending=False)
+                
+                for _, row in breakdown.iterrows():
+                    reason = str(row['LATE_REASON']).replace('_', ' ').title()
+                    count = int(row['COUNT'])
+                    avg_delay = round(row['AVG_DELAY'], 1) if row['AVG_DELAY'] else 0
+                    
+                    icons = {
+                        'Traffic': '🚗',
+                        'Weather': '🌧️',
+                        'Driver Shortage': '👤',
+                        'Kitchen Delay': '🍕',
+                        'High Demand': '📈',
+                        'Address Issue': '📍'
+                    }
+                    icon = icons.get(reason, '⚠️')
+                    
+                    st.markdown(f"**{icon} {reason}**")
+                    st.caption(f"{count} delays | Avg: +{avg_delay} min")
+                    st.progress(min(count / 20, 1.0))
+            else:
+                st.info("No late deliveries to analyze")
+                
+        elif view_option == "On-Time Only":
+            # ON-TIME VIEW: Show success metrics
+            st.subheader("✅ On-Time Performance")
+            
+            if not filtered_data.empty:
+                avg_time = filtered_data['DELIVERY_DURATION_MIN'].mean()
+                fastest = filtered_data['DELIVERY_DURATION_MIN'].min()
+                
+                st.metric("⏱️ Avg Delivery Time", f"{avg_time:.0f} min")
+                st.metric("🚀 Fastest Delivery", f"{fastest:.0f} min")
+                st.metric("📦 On-Time Count", len(filtered_data))
+                
+                # Show delivery time distribution
+                st.markdown("**Delivery Times**")
+                if 'DELIVERY_DURATION_MIN' in filtered_data.columns:
+                    bins = [0, 25, 30, 35, 100]
+                    labels = ['< 25 min', '25-30 min', '30-35 min', '> 35 min']
+                    filtered_data['time_bucket'] = pd.cut(filtered_data['DELIVERY_DURATION_MIN'], bins=bins, labels=labels)
+                    time_dist = filtered_data['time_bucket'].value_counts().sort_index()
+                    for bucket, count in time_dist.items():
+                        st.caption(f"{bucket}: {count} deliveries")
+            else:
+                st.info("No on-time deliveries to show")
+                
+        else:
+            # ALL DELIVERIES VIEW: Show overview stats
+            st.subheader("📊 Delivery Overview")
+            
+            if not filtered_data.empty:
+                total = len(filtered_data)
+                late_count = len(filtered_data[filtered_data['IS_LATE'] == True])
+                ontime_count = total - late_count
+                ontime_pct = (ontime_count / total * 100) if total > 0 else 0
+                late_pct = (late_count / total * 100) if total > 0 else 0
+                
+                st.metric("📦 Total Deliveries", total)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("✅ On-Time", ontime_count)
+                    st.caption(f"{ontime_pct:.0f}% of deliveries")
+                with col2:
+                    st.metric("⚠️ Late", late_count)
+                    st.caption(f"{late_pct:.0f}% of deliveries")
+                
+                # Avg delivery time
+                avg_time = filtered_data['DELIVERY_DURATION_MIN'].mean()
+                st.metric("⏱️ Avg Time", f"{avg_time:.0f} min")
+                st.caption("Average delivery duration")
+                
+                # Top delay reason if any late
+                if late_count > 0:
+                    late_data = filtered_data[filtered_data['IS_LATE'] == True]
+                    top_reason = late_data['LATE_REASON'].mode().iloc[0] if not late_data['LATE_REASON'].mode().empty else 'Unknown'
+                    st.markdown(f"**🔍 Top Issue:** {top_reason}")
+                    st.caption("Most common delay reason")
+            else:
+                st.info("No delivery data available")
+        
+        st.divider()
+        
+        # Weather Impact
+        st.subheader("🌤️ Weather Impact")
+        st.markdown(f"### {weather['icon']} {weather['condition']}")
+        st.caption(f"Late rate: **{weather['late_pct']}%** | Avg time: **{weather['avg_duration']} min**")
 
 
 # =============================================================================
@@ -692,32 +1423,23 @@ def main():
         st.session_state.pending_question = None
     if "selected_store" not in st.session_state:
         st.session_state.selected_store = "Chicago Loop"
+    if "active_view" not in st.session_state:
+        st.session_state.active_view = "Dashboard"
     
     # Ensure connection is established
     get_snowflake_connection()
     
-    # Sidebar with store selector and demo questions
+    # Sidebar with store info and demo questions
     with st.sidebar:
-        st.header(":pizza: Store Manager View")
+        st.header(":pizza: Chicago Loop")
         
-        # Store selector
-        st.session_state.selected_store = st.selectbox(
-            "Select Your Store",
-            options=CRISIS_STORES + ["Chicago Wrigleyville", "Downtown Phoenix", "Naperville"],
-            index=0,
-            help="Demo tip: Select a crisis store (Chicago Loop, LA Downtown, Manhattan Midtown, Miami Beach) for dramatic results!"
-        )
-        
-        # Show crisis indicator
-        if st.session_state.selected_store in CRISIS_STORES:
-            st.error(f"⚠️ **{st.session_state.selected_store}** is in CRISIS mode!")
-        else:
-            st.success(f"✅ **{st.session_state.selected_store}** is operating normally")
+        # Hardcode Chicago Loop as the store
+        st.session_state.selected_store = "Chicago Loop"
         
         st.divider()
         
         # Demo Questions section
-        st.subheader("🎯 Demo Questions")
+        st.subheader("🎯 Sample Questions")
         st.caption("Click any question to ask the AI assistant")
         
         for i, q in enumerate(DEMO_QUESTIONS):
@@ -728,6 +1450,7 @@ def main():
                 store_question = f"For {st.session_state.selected_store}: {q['question']}"
                 st.session_state.pending_question = store_question
                 st.session_state.pending_type = q.get("type")
+                st.session_state.active_view = "Chat"  # Switch to chat view
                 st.rerun()
         
         st.divider()
@@ -756,91 +1479,127 @@ def main():
             """)
             st.caption(f"Model: `{SEMANTIC_MODEL_FILE}`")
     
-    # Process pending question from sidebar
-    if st.session_state.pending_question:
-        question = st.session_state.pending_question
-        q_type = st.session_state.get("pending_type")
-        st.session_state.pending_question = None
-        st.session_state.pending_type = None
-        st.session_state.processing = True
-        process_user_question(question, q_type)
-        st.session_state.processing = False
-        st.rerun()
+    # Main content area - view selector that syncs with session state
+    view_options = ["📊 Dashboard", "💬 Chat Assistant"]
+    current_index = 1 if st.session_state.active_view == "Chat" else 0
     
-    # Main content area - show welcome message if no chat history
-    if not st.session_state.messages and not st.session_state.processing:
-        st.markdown(f"""
-        ### Welcome, {st.session_state.selected_store} Manager! 👋
+    selected_view = st.radio(
+        "View",
+        view_options,
+        index=current_index,
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+    
+    # Update session state based on selection
+    st.session_state.active_view = "Chat" if selected_view == "💬 Chat Assistant" else "Dashboard"
+    
+    st.divider()
+    
+    # Render the selected view
+    if st.session_state.active_view == "Dashboard":
+        render_dashboard(st.session_state.selected_store)
+    else:
+        # Chat view
+        # Process pending question from sidebar
+        if st.session_state.pending_question:
+            question = st.session_state.pending_question
+            q_type = st.session_state.get("pending_type")
+            st.session_state.pending_question = None
+            st.session_state.pending_type = None
+            st.session_state.processing = True
+            process_user_question(question, q_type)
+            st.session_state.processing = False
+            st.rerun()
         
-        I'm your AI assistant powered by **Snowflake Cortex**. I can help you understand:
-        
-        - 📦 **Delivery Performance** - Are deliveries on time? What's causing delays?
-        - 🍕 **Kitchen Capacity** - Equipment status, production capacity
-        - 💰 **Revenue Impact** - How issues are affecting your bottom line
-        - 💬 **Customer Feedback** - What are customers saying about your store?
-        
-        **👈 Click a demo question in the sidebar** or type your own question below!
-        """)
-        
-        # Show quick stats for selected store
-        if st.session_state.selected_store in CRISIS_STORES:
-            st.warning(f"""
-            ⚠️ **Alert for {st.session_state.selected_store}:**
-            Your store is currently experiencing operational challenges. 
-            Use the demo questions to investigate!
+        # Main content area - show welcome message if no chat history
+        if not st.session_state.messages and not st.session_state.processing:
+            st.markdown(f"""
+            ### Welcome, {st.session_state.selected_store} Manager! 👋
+            
+            I'm your AI assistant powered by **Snowflake Cortex**. I can help you understand:
+            
+            - 📦 **Delivery Performance** - Are deliveries on time? What's causing delays?
+            - 🍕 **Kitchen Capacity** - Equipment status, production capacity
+            - 💰 **Revenue Impact** - How issues are affecting your bottom line
+            - 💬 **Customer Feedback** - What are customers saying about your store?
+            
+            **👈 Click a demo question in the sidebar** or type your own question below!
             """)
-    
-    # Display chat history
-    for idx, message in enumerate(st.session_state.messages):
-        role = message["role"]
-        content = message["content"]
-        query_type = message.get("query_type", "analyst")
         
-        if role == "user":
-            with st.chat_message("user"):
-                # User content is simple text
-                text = content[0].get("text", "") if content else ""
-                st.markdown(text)
-        else:
-            with st.chat_message("assistant", avatar=":material/robot:"):
-                if query_type == "search":
-                    # Display search results
-                    text = content[0].get("text", "") if content else ""
-                    documents = message.get("documents", [])
-                    display_search_content(text, documents, idx)
-                elif query_type == "both":
-                    # Display combined results
-                    sql = message.get("sql")
-                    documents = message.get("documents", [])
-                    st.markdown("### Data Analysis")
-                    display_message_content(content, idx)
-                    if sql:
-                        display_sql_results(sql)
-                    if documents:
-                        st.markdown("### Related Documents")
-                        st.markdown(format_search_results(documents, ""))
-                else:
-                    # Display analyst results
-                    sql = display_message_content(content, idx)
-                    if sql:
-                        st.divider()
-                        display_sql_results(sql)
-    
-    # Handle pending question from suggestion buttons
-    if st.session_state.pending_question and not st.session_state.processing:
-        question = st.session_state.pending_question
-        st.session_state.pending_question = None
-        st.session_state.processing = True
-        process_user_question(question)
-        st.session_state.processing = False
-        st.rerun()
-    
-    # Chat input
-    if prompt := st.chat_input("Ask about sales, deliveries, inventory, or customer reviews..."):
-        st.session_state.processing = True
-        process_user_question(prompt)
-        st.session_state.processing = False
-        st.rerun()
+        # Display chat history
+        for idx, message in enumerate(st.session_state.messages):
+            role = message["role"]
+            content = message["content"]
+            query_type = message.get("query_type", "analyst")
+            
+            if role == "user":
+                with st.chat_message("user"):
+                    # User content is simple text - handle both list and string formats
+                    if isinstance(content, str):
+                        text = content
+                    elif isinstance(content, list) and content:
+                        text = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])
+                    else:
+                        text = ""
+                    st.markdown(text)
+            else:
+                with st.chat_message("assistant", avatar=":material/robot:"):
+                    if query_type == "search":
+                        # Display search results - handle both list and string formats
+                        if isinstance(content, str):
+                            text = content
+                        elif isinstance(content, list) and content:
+                            text = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])
+                        else:
+                            text = ""
+                        documents = message.get("documents", [])
+                        display_search_content(text, documents, idx)
+                        # Display stored recommendations for search
+                        recommendations = message.get("recommendations")
+                        if recommendations:
+                            st.divider()
+                            st.markdown("### 💡 Answer & Recommendations")
+                            st.markdown(recommendations)
+                    elif query_type == "both":
+                        # Display combined results
+                        sql = message.get("sql")
+                        documents = message.get("documents", [])
+                        st.markdown("### Data Analysis")
+                        display_message_content(content, idx)
+                        if sql:
+                            display_sql_results(sql)
+                        if documents:
+                            st.markdown("### Related Documents")
+                            st.markdown(format_search_results(documents, ""))
+                    else:
+                        # Display analyst results
+                        sql = display_message_content(content, idx)
+                        if sql:
+                            st.divider()
+                            display_sql_results(sql)
+                        # Display stored recommendations
+                        recommendations = message.get("recommendations")
+                        if recommendations:
+                            st.divider()
+                            st.markdown("### 💡 Manager Recommendations")
+                            st.markdown(recommendations)
+        
+        # Handle pending question from suggestion buttons
+        if st.session_state.pending_question and not st.session_state.processing:
+            question = st.session_state.pending_question
+            st.session_state.pending_question = None
+            st.session_state.processing = True
+            process_user_question(question)
+            st.session_state.processing = False
+            st.rerun()
+        
+        # Chat input
+        if prompt := st.chat_input("Ask about sales, deliveries, inventory, or customer reviews..."):
+            st.session_state.processing = True
+            process_user_question(prompt)
+            st.session_state.processing = False
+            st.rerun()
 
 
 if __name__ == "__main__":

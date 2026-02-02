@@ -1202,24 +1202,134 @@ tables:
 # VERIFIED QUERIES - Pre-validated queries for common questions
 # ============================================================================
 verified_queries:
-  - name: friday_shift_prep
-    question: What should I get ready for Friday night shift?
+  - name: sales_comparison_last_night
+    question: "For Chicago Loop: Why were my sales lower than usual last night in this store?"
+    verified_by: Jonathan Vestin
+    verified_at: 1737500000
     sql: |
       SELECT 
-        store_name,
-        order_date,
-        DAYNAME(order_date) as day_of_week,
-        COUNT(*) as total_orders,
-        SUM(total_amount) as total_revenue,
-        AVG(total_amount) as avg_order_value,
-        weather_condition,
-        is_game_day
+        TO_CHAR(order_date, 'Mon DD') as "Date",
+        DAYNAME(order_date) as "Day",
+        COUNT(*) as "Orders",
+        ROUND(SUM(total_amount), 0) as "Revenue ($)",
+        weather_condition as "Weather",
+        CASE WHEN is_game_day THEN game_event ELSE '-' END as "Event"
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.V_ORDERS
+      WHERE store_name = 'Chicago Loop'
+        AND order_date >= CURRENT_DATE() - 14
+      GROUP BY order_date, weather_condition, is_game_day, game_event
+      ORDER BY order_date ASC
+
+  - name: friday_shift_prep
+    question: "For Chicago Loop: What should I get ready for this Friday night shift?"
+    verified_by: Jonathan Vestin
+    verified_at: 1737500000
+    use_as_onboarding_question: true
+    sql: |
+      SELECT 
+        TO_CHAR(order_date, 'Mon DD') as "Friday",
+        COUNT(*) as "Orders",
+        ROUND(SUM(total_amount), 0) as "Revenue ($)",
+        ROUND(AVG(total_amount), 2) as "Avg Order ($)",
+        weather_condition as "Weather",
+        CASE WHEN is_game_day THEN '🏀 ' || game_event ELSE '-' END as "Event"
       FROM PIZZA_INTELLIGENCE.ANALYTICS.V_ORDERS
       WHERE store_name = 'Chicago Loop'
         AND DAYNAME(order_date) = 'Fri'
-        AND order_date >= CURRENT_DATE() - 14
-      GROUP BY store_name, order_date, weather_condition, is_game_day
-      ORDER BY order_date DESC
+        AND order_date >= CURRENT_DATE() - 35
+      GROUP BY order_date, weather_condition, is_game_day, game_event
+      ORDER BY order_date ASC
+
+  - name: delivery_trend_analysis
+    question: "For Chicago Loop: Show me my delivery performance by week for the last month"
+    verified_by: Jonathan Vestin
+    verified_at: 1737500000
+    sql: |
+      SELECT 
+        TO_CHAR(DATE_TRUNC('week', delivery_date)::DATE, 'Mon DD') as "Week",
+        COUNT(*) as "Total Deliveries",
+        SUM(CASE WHEN is_late THEN 1 ELSE 0 END) as "Late Deliveries",
+        ROUND(SUM(CASE WHEN is_late THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) as "Late %",
+        ROUND(AVG(delivery_duration_min), 0) as "Avg Time (min)"
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
+      WHERE store_name = 'Chicago Loop'
+        AND delivery_date >= CURRENT_DATE() - 28
+      GROUP BY DATE_TRUNC('week', delivery_date)
+      ORDER BY DATE_TRUNC('week', delivery_date) ASC
+
+  - name: top_fixes_this_week
+    question: "For Chicago Loop: What are the top things I should fix this week to improve operations?"
+    verified_by: Jonathan Vestin
+    verified_at: 1737500000
+    sql: |
+      -- Combines key issues from deliveries, kitchen, and sales into actionable priorities
+      SELECT priority as "Priority", area as "Area", issue as "Issue", metric as "Current Metric", action as "Recommended Action"
+      FROM (
+        -- Delivery late rate
+        SELECT 1 as priority, '🚚 Delivery' as area, 
+               'High late delivery rate' as issue,
+               ROUND(SUM(CASE WHEN is_late THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) || '% late rate' as metric,
+               'Schedule extra drivers for peak hours (5-8pm)' as action
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
+        WHERE store_name = 'Chicago Loop' AND delivery_date >= CURRENT_DATE() - 7
+        
+        UNION ALL
+        
+        -- Traffic delays specifically
+        SELECT 2 as priority, '🚗 Delivery' as area,
+               'Traffic causing delays' as issue,
+               COUNT(*) || ' traffic-related late deliveries' as metric,
+               'Use alternate routes, pre-position drivers near hotspots' as action
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
+        WHERE store_name = 'Chicago Loop' AND delivery_date >= CURRENT_DATE() - 7 AND LOWER(late_reason) = 'traffic'
+        
+        UNION ALL
+        
+        -- Kitchen equipment issues  
+        SELECT 3 as priority, '🍕 Kitchen' as area,
+               'Equipment downtime' as issue,
+               SUM(oven_downtime_minutes) || ' min lost this week' as metric,
+               'Schedule preventive maintenance for Oven 2' as action
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_KITCHEN_CAPACITY
+        WHERE store_name = 'Chicago Loop' AND capacity_date >= CURRENT_DATE() - 7
+        
+        UNION ALL
+        
+        -- Low customer ratings
+        SELECT 4 as priority, '⭐ Quality' as area,
+               'Customer ratings declining' as issue,
+               ROUND(AVG(customer_rating), 2) || ' avg rating (target: 4.5)' as metric,
+               'Focus on order accuracy and hot delivery' as action
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
+        WHERE store_name = 'Chicago Loop' AND delivery_date >= CURRENT_DATE() - 7
+        
+        UNION ALL
+        
+        -- Revenue trend
+        SELECT 5 as priority, '💰 Sales' as area,
+               'Revenue below target' as issue,
+               '$' || TO_CHAR(SUM(total_amount), '999,999') || ' (7-day total)' as metric,
+               'Run game day promos, upsell combos' as action
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_ORDERS
+        WHERE store_name = 'Chicago Loop' AND order_date >= CURRENT_DATE() - 7
+      )
+      ORDER BY priority
+
+  - name: kitchen_capacity_weekly
+    question: What is my kitchen capacity and are there equipment issues?
+    sql: |
+      SELECT 
+        capacity_date as "Date",
+        DAYNAME(capacity_date) as "Day",
+        MIN(ovens_operational) || ' / ' || MAX(total_ovens) as "Ovens Working",
+        ROUND(SUM(actual_pizzas_made) * 100.0 / NULLIF(SUM(max_pizzas_per_hour), 0), 0) || '%' as "Utilization",
+        SUM(oven_downtime_minutes) as "Downtime (min)",
+        COALESCE(LISTAGG(DISTINCT NULLIF(downtime_reason, ''), '; '), 'None') as "Equipment Issues"
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.V_KITCHEN_CAPACITY
+      WHERE store_name = 'Chicago Loop'
+        AND capacity_date >= CURRENT_DATE() - 7
+      GROUP BY capacity_date
+      ORDER BY capacity_date DESC
 
   - name: store_delivery_performance
     question: Show me delivery performance for a specific store like Chicago Loop
@@ -1236,6 +1346,24 @@ verified_queries:
         AND delivery_date >= CURRENT_DATE() - 7
       GROUP BY store_name, delivery_date
       ORDER BY delivery_date DESC
+
+  - name: store_comparison_delivery
+    question: How does my store compare to other stores for delivery performance?
+    sql: |
+      SELECT 
+        store_name as "Store",
+        COUNT(*) as "Deliveries",
+        SUM(CASE WHEN is_late THEN 1 ELSE 0 END) as "Late",
+        ROUND(SUM(CASE WHEN is_late THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) || '%' as "Late %",
+        ROUND(AVG(delivery_duration_min), 1) || ' min' as "Avg Time",
+        CASE 
+          WHEN store_name = 'Chicago Loop' THEN '⭐ Your Store'
+          ELSE ''
+        END as "Note"
+      FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
+      WHERE delivery_date >= CURRENT_DATE() - 14
+      GROUP BY store_name
+      ORDER BY SUM(CASE WHEN is_late THEN 1 ELSE 0 END) * 100.0 / COUNT(*) DESC
 
   - name: store_late_reasons
     question: What's causing late deliveries at a specific store?
