@@ -43,6 +43,10 @@ tables:
       schema: ANALYTICS
       table: V_ORDERS
     
+    primary_key:
+      columns:
+        - order_id
+    
     dimensions:
       - name: order_id
         description: Unique identifier for each order
@@ -202,6 +206,10 @@ tables:
       schema: ANALYTICS
       table: DIM_STORES
     
+    primary_key:
+      columns:
+        - store_id
+    
     dimensions:
       - name: store_id
         description: Unique store identifier
@@ -279,6 +287,10 @@ tables:
       schema: ANALYTICS
       table: DIM_PRODUCTS
     
+    primary_key:
+      columns:
+        - product_id
+    
     dimensions:
       - name: product_id
         description: Unique product identifier
@@ -355,6 +367,11 @@ tables:
         expr: delivery_id
         data_type: VARCHAR
         unique: true
+        
+      - name: order_id
+        description: Order identifier for this delivery
+        expr: order_id
+        data_type: VARCHAR
         
       - name: delivery_date
         description: Date of delivery
@@ -443,6 +460,10 @@ tables:
       database: PIZZA_INTELLIGENCE
       schema: ANALYTICS
       table: DIM_CAMPAIGNS
+    
+    primary_key:
+      columns:
+        - campaign_id
     
     dimensions:
       - name: campaign_id
@@ -861,6 +882,10 @@ tables:
       schema: ANALYTICS
       table: DIM_CUSTOMERS
     
+    primary_key:
+      columns:
+        - customer_id
+    
     dimensions:
       - name: customer_id
         description: Unique customer identifier
@@ -1199,6 +1224,130 @@ tables:
         default_aggregation: sum
 
 # ============================================================================
+# RELATIONSHIPS - Define how tables join together
+# ============================================================================
+relationships:
+  # Order Items to Orders (many items belong to one order)
+  - name: items_to_orders
+    left_table: order_items
+    right_table: orders
+    relationship_type: many_to_one
+    join_type: left_outer
+    relationship_columns:
+      - left_column: order_id
+        right_column: order_id
+
+  # Deliveries to Orders (one delivery per order)
+  - name: deliveries_to_orders
+    left_table: deliveries
+    right_table: orders
+    relationship_type: many_to_one
+    join_type: left_outer
+    relationship_columns:
+      - left_column: order_id
+        right_column: order_id
+
+  # Orders to Stores
+  - name: orders_to_stores
+    left_table: orders
+    right_table: stores
+    relationship_type: many_to_one
+    join_type: left_outer
+    relationship_columns:
+      - left_column: store_id
+        right_column: store_id
+
+  # Orders to Campaigns
+  - name: orders_to_campaigns
+    left_table: orders
+    right_table: campaigns
+    relationship_type: many_to_one
+    join_type: left_outer
+    relationship_columns:
+      - left_column: campaign_id
+        right_column: campaign_id
+
+  # Order Items to Products
+  - name: items_to_products
+    left_table: order_items
+    right_table: products
+    relationship_type: many_to_one
+    join_type: left_outer
+    relationship_columns:
+      - left_column: product_id
+        right_column: product_id
+
+  # Deliveries to Stores
+  - name: deliveries_to_stores
+    left_table: deliveries
+    right_table: stores
+    relationship_type: many_to_one
+    join_type: left_outer
+    relationship_columns:
+      - left_column: store_id
+        right_column: store_id
+
+  # Kitchen Capacity to Stores
+  - name: capacity_to_stores
+    left_table: kitchen_capacity
+    right_table: stores
+    relationship_type: many_to_one
+    join_type: left_outer
+    relationship_columns:
+      - left_column: store_id
+        right_column: store_id
+
+  # Inventory to Stores
+  - name: inventory_to_stores
+    left_table: inventory
+    right_table: stores
+    relationship_type: many_to_one
+    join_type: left_outer
+    relationship_columns:
+      - left_column: store_id
+        right_column: store_id
+
+  # Staffing to Stores
+  - name: staffing_to_stores
+    left_table: staffing
+    right_table: stores
+    relationship_type: many_to_one
+    join_type: left_outer
+    relationship_columns:
+      - left_column: store_id
+        right_column: store_id
+
+  # Campaign Performance to Campaigns
+  - name: perf_to_campaigns
+    left_table: campaign_performance
+    right_table: campaigns
+    relationship_type: many_to_one
+    join_type: left_outer
+    relationship_columns:
+      - left_column: campaign_id
+        right_column: campaign_id
+
+  # Campaign Performance to Stores
+  - name: perf_to_stores
+    left_table: campaign_performance
+    right_table: stores
+    relationship_type: many_to_one
+    join_type: left_outer
+    relationship_columns:
+      - left_column: store_id
+        right_column: store_id
+
+  # Orders to Customers
+  - name: orders_to_customers
+    left_table: orders
+    right_table: customers
+    relationship_type: many_to_one
+    join_type: left_outer
+    relationship_columns:
+      - left_column: customer_id
+        right_column: customer_id
+
+# ============================================================================
 # VERIFIED QUERIES - Pre-validated queries for common questions
 # ============================================================================
 verified_queries:
@@ -1239,6 +1388,101 @@ verified_queries:
         AND order_date >= CURRENT_DATE() - 35
       GROUP BY order_date, weather_condition, is_game_day, game_event
       ORDER BY order_date ASC
+
+  - name: friday_game_night_forecast
+    question: "For Chicago Loop: What should we expect next Friday night? There's a football game nearby. Give me demand forecast and staffing recommendations."
+    verified_by: Jonathan Vestin
+    verified_at: 1737500000
+    sql: |
+      WITH friday_history AS (
+        SELECT 
+          order_date,
+          COUNT(*) as orders,
+          SUM(total_amount) as revenue,
+          AVG(total_amount) as avg_order,
+          is_game_day
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_ORDERS
+        WHERE store_name = 'Chicago Loop'
+          AND DAYNAME(order_date) = 'Fri'
+          AND order_date >= CURRENT_DATE() - 60
+        GROUP BY order_date, is_game_day
+      ),
+      game_day_avg AS (
+        SELECT 
+          ROUND(AVG(orders)) as avg_orders,
+          ROUND(AVG(revenue), 0) as avg_revenue,
+          ROUND(AVG(avg_order), 2) as avg_order_size
+        FROM friday_history
+        WHERE is_game_day = TRUE
+      ),
+      regular_friday_avg AS (
+        SELECT 
+          ROUND(AVG(orders)) as avg_orders,
+          ROUND(AVG(revenue), 0) as avg_revenue
+        FROM friday_history
+        WHERE is_game_day = FALSE
+      ),
+      demand_forecast AS (
+        SELECT 
+          'DEMAND FORECAST' as section,
+          '📊 Expected Orders' as col1,
+          gda.avg_orders || ' orders' as col2,
+          ROUND((gda.avg_orders - rfa.avg_orders) * 100.0 / rfa.avg_orders, 0) || '% above regular Friday' as col3,
+          1 as sort_key
+        FROM game_day_avg gda, regular_friday_avg rfa
+        UNION ALL
+        SELECT 
+          'DEMAND FORECAST',
+          '💰 Expected Revenue',
+          '$' || gda.avg_revenue,
+          'Plan for high-volume night',
+          2
+        FROM game_day_avg gda
+        UNION ALL
+        SELECT 
+          'DEMAND FORECAST',
+          '🛒 Avg Order Size',
+          '$' || gda.avg_order_size,
+          'Expect larger group orders',
+          3
+        FROM game_day_avg gda
+      ),
+      staffing_recommendations AS (
+        SELECT 
+          'STAFFING RECOMMENDATIONS' as section,
+          '👨‍🍳 Kitchen Staff' as col1,
+          '10-12 staff' as col2,
+          'Schedule full team, no call-offs' as col3,
+          1 as sort_key
+        UNION ALL
+        SELECT 
+          'STAFFING RECOMMENDATIONS',
+          '🚗 Delivery Riders',
+          '8-10 riders',
+          'Pre-position near stadium area',
+          2
+        UNION ALL
+        SELECT 
+          'STAFFING RECOMMENDATIONS',
+          '⏰ Peak Hours',
+          '5-9pm critical',
+          'All hands on deck, stagger breaks',
+          3
+        UNION ALL
+        SELECT 
+          'STAFFING RECOMMENDATIONS',
+          '📦 Prep Work',
+          'Extra dough + toppings',
+          'Prep 30% more than usual Friday',
+          4
+      )
+      SELECT section, col1, col2, col3
+      FROM (
+        SELECT section, col1, col2, col3, 1 as section_order, sort_key FROM demand_forecast
+        UNION ALL
+        SELECT section, col1, col2, col3, 2 as section_order, sort_key FROM staffing_recommendations
+      )
+      ORDER BY section_order, sort_key
 
   - name: friday_night_forecast
     question: "For Chicago Loop: How many orders do we typically get on Friday nights? What was our revenue last Friday?"
@@ -1944,4 +2188,109 @@ verified_queries:
       GROUP BY s.store_name, s.city, s.region
       ORDER BY total_revenue DESC
       LIMIT 10
+
+  - name: weather_impact_on_sales
+    question: How does weather impact sales at Chicago Loop? What promos work for each weather type?
+    verified_by: Jonathan Vestin
+    verified_at: 1737500000
+    sql: |
+      WITH weather_revenue AS (
+        SELECT 
+          weather_condition,
+          COUNT(DISTINCT order_date) as days_with_weather,
+          ROUND(SUM(total_amount) / COUNT(DISTINCT order_date), 0) as avg_daily_revenue,
+          COUNT(*) as total_orders,
+          ROUND(AVG(total_amount), 2) as avg_order_value
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_ORDERS
+        WHERE store_name = 'Chicago Loop'
+          AND order_date >= CURRENT_DATE() - 30
+        GROUP BY weather_condition
+      ),
+      best_weather AS (
+        SELECT weather_condition, avg_daily_revenue
+        FROM weather_revenue
+        ORDER BY avg_daily_revenue DESC
+        LIMIT 1
+      )
+      SELECT 
+        wr.weather_condition as "Weather",
+        '$' || TO_CHAR(wr.avg_daily_revenue, '999,999') as "Avg Daily Revenue",
+        wr.days_with_weather || ' days' as "Sample Size",
+        CASE 
+          WHEN wr.weather_condition = bw.weather_condition THEN '🌟 Best performer'
+          WHEN wr.avg_daily_revenue >= bw.avg_daily_revenue * 0.9 THEN '✅ Strong'
+          ELSE '📊 Reference'
+        END as "Note"
+      FROM weather_revenue wr
+      CROSS JOIN best_weather bw
+      ORDER BY wr.avg_daily_revenue DESC
+
+  - name: sales_analysis_with_weather_promos
+    question: "For Chicago Loop: Why were my sales lower than usual? What promo would help boost sales given the upcoming weather?"
+    verified_by: Jonathan Vestin
+    verified_at: 1737500000
+    sql: |
+      WITH recent_performance AS (
+        SELECT 
+          'RECENT PERFORMANCE' as section,
+          TO_CHAR(order_date, 'Mon DD') as col1,
+          COUNT(*) || ' orders, $' || ROUND(SUM(total_amount), 0) as col2,
+          CASE 
+            WHEN COUNT(*) < 60 THEN '⚠️ Below average'
+            WHEN COUNT(*) > 100 THEN '🚀 Above average'
+            ELSE '✅ Normal'
+          END as col3,
+          DATE_PART(epoch_second, order_date) as sort_key
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_ORDERS
+        WHERE store_name = 'Chicago Loop'
+          AND order_date >= CURRENT_DATE() - 7
+        GROUP BY order_date
+      ),
+      weather_impact AS (
+        SELECT 
+          'WEATHER IMPACT' as section,
+          weather_condition as col1,
+          '$' || ROUND(SUM(total_amount) / COUNT(DISTINCT order_date), 0) || ' avg daily revenue' as col2,
+          CASE 
+            WHEN SUM(total_amount) / COUNT(DISTINCT order_date) = MAX(SUM(total_amount) / COUNT(DISTINCT order_date)) OVER () THEN '🌟 Top performer - maximize staffing'
+            WHEN SUM(total_amount) / COUNT(DISTINCT order_date) >= MAX(SUM(total_amount) / COUNT(DISTINCT order_date)) OVER () * 0.9 THEN '✅ Strong - push delivery promos'
+            ELSE '⚠️ Lower sales - run comfort food deals'
+          END as col3,
+          SUM(total_amount) / COUNT(DISTINCT order_date) as sort_key
+        FROM PIZZA_INTELLIGENCE.ANALYTICS.V_ORDERS
+        WHERE store_name = 'Chicago Loop'
+          AND order_date >= CURRENT_DATE() - 30
+        GROUP BY weather_condition
+      ),
+      promo_recommendations AS (
+        SELECT 
+          'PROMO RECOMMENDATIONS' as section,
+          'Sunny Day Combo' as col1,
+          'Family pack + cold drinks bundle' as col2,
+          'Outdoor gatherings drive larger orders' as col3,
+          1.0 as sort_key
+        UNION ALL
+        SELECT 
+          'PROMO RECOMMENDATIONS',
+          'Rainy Day Special',
+          'Free delivery + 20% off family meals',
+          'Customers stay home and order more delivery',
+          2.0
+        UNION ALL
+        SELECT 
+          'PROMO RECOMMENDATIONS',
+          'Cold Weather Warmup',
+          'Hot stuffed crust + free breadsticks',
+          'Hearty comfort food drives sales in cold weather',
+          3.0
+      )
+      SELECT section, col1, col2, col3
+      FROM (
+        SELECT section, col1, col2, col3, 1 as section_order, sort_key FROM promo_recommendations
+        UNION ALL
+        SELECT section, col1, col2, col3, 2 as section_order, sort_key FROM recent_performance
+        UNION ALL
+        SELECT section, col1, col2, col3, 3 as section_order, sort_key FROM weather_impact
+      )
+      ORDER BY section_order, sort_key DESC
 
