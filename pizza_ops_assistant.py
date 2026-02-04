@@ -341,7 +341,18 @@ def get_route_coordinates(start_lon: float, start_lat: float, end_lon: float, en
     Falls back to direct line if API fails.
     """
     # OpenRouteService free API (5000 requests/day)
-    ORS_API_KEY = "REMOVED_API_KEY"  # Demo key - replace for production
+    # Get your free key at: https://openrouteservice.org/dev/#/signup
+    ORS_API_KEY = os.environ.get("ORS_API_KEY", None)
+    
+    # If no API key, return direct line with curve
+    if not ORS_API_KEY:
+        mid_lon = (start_lon + end_lon) / 2 + 0.002
+        mid_lat = (start_lat + end_lat) / 2 + 0.001
+        return [
+            [start_lon, start_lat],
+            [mid_lon, mid_lat],
+            [end_lon, end_lat]
+        ]
     
     try:
         url = "https://api.openrouteservice.org/v2/directions/driving-car"
