@@ -49,8 +49,22 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Snowflake account configuration (demo43)
-SNOWFLAKE_ACCOUNT = "YOUR_ACCOUNT"
+# Snowflake account configuration - reads from secrets.toml, env var, or uses placeholder
+def get_snowflake_account():
+    """Get Snowflake account from secrets or environment."""
+    # Try Streamlit secrets first
+    try:
+        if hasattr(st, 'secrets'):
+            if 'snowflake' in st.secrets and 'account' in st.secrets['snowflake']:
+                return st.secrets['snowflake']['account']
+            if 'connections' in st.secrets and 'snowflake' in st.secrets['connections']:
+                return st.secrets['connections']['snowflake'].get('account', 'YOUR_ACCOUNT')
+    except:
+        pass
+    # Fall back to environment variable
+    return os.environ.get("SNOWFLAKE_ACCOUNT", "YOUR_ACCOUNT")
+
+SNOWFLAKE_ACCOUNT = get_snowflake_account()
 SNOWFLAKE_HOST = f"{SNOWFLAKE_ACCOUNT}.snowflakecomputing.com"
 
 # Semantic model configuration (for Cortex Analyst)

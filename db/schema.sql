@@ -3,8 +3,8 @@
 -- OLTP (Transactional) + OLAP (Analytics) Tables
 -- =============================================================================
 
--- Use personal database
-USE DATABASE YOUR_DATABASE;
+-- Use your own database (replace with your database name)
+USE DATABASE PIZZA_INTELLIGENCE;
 
 -- =============================================================================
 -- SCHEMA: OLTP - Operational/Transactional Data
