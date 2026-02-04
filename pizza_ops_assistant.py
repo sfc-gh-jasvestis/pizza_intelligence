@@ -2255,7 +2255,7 @@ def render_live_orders():
     # =========================================================================
     
     # Control buttons - simple row
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
+    col_btn1, col_btn2, col_btn3, col_btn4 = st.columns([1, 1, 1, 1])
     
     with col_btn1:
         if st.button("🍕 New Order", use_container_width=True):
@@ -2290,6 +2290,9 @@ def render_live_orders():
                     del st.session_state[key]
             
             st.rerun()
+    
+    with col_btn4:
+        auto_refresh = st.checkbox("Auto-refresh", value=False, help="Refresh every 3 seconds")
     
     # =========================================================================
     # HERO METRICS
@@ -2622,6 +2625,12 @@ def render_live_orders():
                         for item in order.items:
                             qty_str = f"{item.quantity}x " if item.quantity > 1 else ""
                             st.caption(f"• {qty_str}{item.item_name} — ${item.total_price:.2f}")
+    
+    # Auto-refresh if enabled (at the very end of the function)
+    if auto_refresh:
+        import time as time_module
+        time_module.sleep(3)
+        st.rerun()
 
 
 # =============================================================================
