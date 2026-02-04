@@ -2328,8 +2328,8 @@ def render_live_orders():
     col4.metric("⏱️ Avg Delivery", f"{avg_time:.0f} min" if avg_time > 0 else "—")
     
     # Weather & Status bar - check actual thread health
-    weather_icons = {"Sunny": "☀️", "Cloudy": "☁️", "Rainy": "🌧️", "Snowy": "❄️", "Clear": "🌙", "Cold": "🌡️"}
-    w_icon = weather_icons.get(weather_condition, "🌡️")
+    # Use consistent icons with global WEATHER_ICONS (lowercase key lookup)
+    w_icon = WEATHER_ICONS.get(weather_condition.lower() if weather_condition else "clear", "🌤️")
     
     if st.session_state.pipeline_running:
         # Check actual thread health
@@ -2559,13 +2559,6 @@ def render_live_orders():
                         for item in order.items:
                             qty_str = f"{item.quantity}x " if item.quantity > 1 else ""
                             st.caption(f"• {qty_str}{item.item_name} — ${item.total_price:.2f}")
-    
-    # Always auto-refresh to keep connection alive and data fresh
-    # Faster refresh (2s) when active orders, slower (5s) when idle
-    import time as time_module
-    refresh_interval = 2 if len(active_orders) > 0 else 5
-    time_module.sleep(refresh_interval)
-    st.rerun()
 
 
 # =============================================================================
