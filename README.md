@@ -1,8 +1,19 @@
-# The Insight Kitchen
+# Pizza Intelligence Demo
 
-## Snowflake Intelligence Demo for QSR Partners
+## Snowflake Cortex Demo for QSR Operations
 
-This repository contains everything you need to run the **Pizza Intelligence** demo showcasing Snowflake Intelligence capabilities for Quick Service Restaurant (QSR) operations.
+A demo showcasing **Snowflake Cortex** capabilities for Quick Service Restaurant (QSR) operations, featuring a single-store Pizza Operations Assistant for the **Chicago Loop** location.
+
+---
+
+## What This Demo Shows
+
+| Feature | Description |
+|---------|-------------|
+| **Cortex Analyst** | Natural language queries against structured sales, delivery, and operations data |
+| **Cortex Search** | Semantic search across customer reviews, audits, and feedback documents |
+| **Live Orders Pipeline** | Real-time order simulation with kitchen, dispatch, and delivery tracking |
+| **Weather-Based Routing** | Dynamic route recommendations based on weather conditions |
 
 ---
 
@@ -12,69 +23,54 @@ This repository contains everything you need to run the **Pizza Intelligence** d
 pizza/
 ├── README.md                    # This file
 ├── DEMO_SCRIPT.md              # Step-by-step demo walkthrough
-├── pizza_ops_assistant.py      # Streamlit app for Store Managers
+├── pizza_ops_assistant.py      # Main Streamlit app
+├── services/                    # Pipeline services
+│   ├── weather_service.py      # Weather simulation
+│   ├── kitchen_service.py      # Kitchen order processing
+│   ├── driver_dispatch.py      # Delivery dispatch
+│   ├── order_simulator.py      # Order generation
+│   └── database.py             # In-memory order database
+├── config/
+│   └── settings.py             # Configuration settings
 ├── setup/                       # SQL setup scripts (run in order)
-│   ├── 01_create_database.sql   # Create database and schemas
-│   ├── 02_create_tables.sql     # Create dimension and fact tables
-│   ├── 03_load_sample_data.sql  # Load dimension data
-│   ├── 04_load_orders_data.sql  # Load orders and deliveries
-│   ├── 05_load_inventory_staffing.sql  # Load inventory and staffing
-│   ├── 06_setup_cortex_search.sql      # Create Cortex Search service
-│   ├── 07_create_agent.sql      # Agent configuration reference
-│   ├── 08_create_views.sql      # Pre-joined views for semantic model
-│   ├── 09_refresh_data.sql      # Data refresh and alignment script
-│   └── 10_test_demo_queries.sql # Test queries to verify demo
+│   ├── 01_create_database.sql
+│   ├── 02_create_tables.sql
+│   ├── 03_load_sample_data.sql
+│   ├── 04_load_orders_data.sql
+│   ├── 05_load_inventory_staffing.sql
+│   ├── 06_setup_cortex_search.sql
+│   ├── 07_create_agent.sql
+│   ├── 08_create_views.sql
+│   ├── 09_refresh_data.sql
+│   └── 10_test_demo_queries.sql
 ├── semantic_models/
-│   └── pizza_intelligence.yaml  # QSR Master Semantic Model
+│   └── pizza_intelligence.yaml  # Semantic model with verified queries
 ├── .streamlit/
-│   └── secrets.toml.example     # Template for Streamlit credentials
+│   └── secrets.toml.example     # Template for credentials
 └── documents/                   # Sample unstructured documents
-    ├── invoices/               # Supplier invoices
-    ├── audits/                 # Store audit reports
-    └── feedback/               # Customer feedback summaries
+    ├── invoices/
+    ├── audits/
+    └── feedback/
 ```
-
----
-
-## Two Demo Personas
-
-This demo supports **two distinct user personas** with different interfaces:
-
-| Persona | Interface | Use Case |
-|---------|-----------|----------|
-| **Snowflake Intelligence Users** | ai.snowflake.com | Analysts, HQ ops, partner builders doing cross-store analytics |
-| **Store Managers** | Streamlit App | Front-line managers running their individual store |
 
 ---
 
 ## Quick Start
 
 ### Prerequisites
-- Snowflake account with Cortex AI enabled
-- Access to Snowflake Intelligence (ai.snowflake.com)
-- A warehouse (COMPUTE_WH or similar)
+- Snowflake account with Cortex enabled
+- Python 3.9+
+- Streamlit
 
 ### Step 1: Run SQL Setup Scripts
 
-Execute the SQL scripts in order using Snowsight or your preferred SQL client:
+Execute the SQL scripts in order in Snowsight:
 
 ```sql
--- Run each script in sequence
--- 01_create_database.sql
--- 02_create_tables.sql
--- 03_load_sample_data.sql
--- 04_load_orders_data.sql
--- 05_load_inventory_staffing.sql
--- 06_setup_cortex_search.sql
--- 07_create_agent.sql
--- 08_create_views.sql
--- 09_refresh_data.sql  -- Ensures data is aligned for demo
--- 10_test_demo_queries.sql  -- Verify demo works
+-- Run each script in sequence (01 through 10)
 ```
 
 ### Step 2: Upload Semantic Model
-
-Upload `semantic_models/pizza_intelligence.yaml` to the Snowflake stage:
 
 ```sql
 PUT file:///path/to/pizza_intelligence.yaml 
@@ -82,156 +78,87 @@ PUT file:///path/to/pizza_intelligence.yaml
     AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
 ```
 
-Or use Snowsight's stage upload feature.
-
-### Step 3: Create the Agent
-
-1. Go to [ai.snowflake.com](https://ai.snowflake.com)
-2. Create a new Agent named **"Pizza Ops Agent"**
-3. Add two tools:
-   - **Cortex Analyst** tool pointing to the semantic model
-   - **Cortex Search** tool pointing to `PIZZA_DOCUMENT_SEARCH`
-4. Copy orchestration instructions from `setup/07_create_agent.sql`
-
-### Step 4: Run the Streamlit App (Optional)
-
-For the Store Manager persona:
+### Step 3: Configure and Run the App
 
 ```bash
-# Copy secrets template and fill in credentials
+# Copy secrets template
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-# Edit secrets.toml with your Snowflake credentials
 
-# Run the app
+# Edit secrets.toml with your Snowflake credentials
+# Then run:
 streamlit run pizza_ops_assistant.py
 ```
 
 ---
 
-## Demo Questions by Persona
+## Demo Flow
 
-### For Snowflake Intelligence Users
-*(Analysts, HQ ops, partner builders working in the SI UI)*
+### 1. Live Orders View
+Start here to show the real-time operations dashboard:
+- Click **New Order** to generate orders
+- Watch orders flow through: Received → Kitchen → Ready → Delivery
+- See weather-based route advisories
+- Toggle **Auto-refresh** to see live updates
 
-| # | Question | What It Demonstrates |
-|---|----------|---------------------|
-| 1 | **"Show me the capacity gap by city for last Friday"** | Multi-table joins (orders + kitchen capacity + stores), cross-city comparison |
-| 2 | **"Which stores had the highest late delivery rates last Friday and what were the main causes?"** | Delivery performance metrics, root cause analysis, store-level comparison |
-| 3 | **"Compare thin-crust vs pan-pizza performance across channels over the last 8 weeks"** | Product mix analysis by channel with trend explanation |
-| 4 | **"How much revenue are we losing across all stores with kitchen capacity issues?"** | Financial impact quantification, capacity-to-revenue correlation |
-| 5 | **"Which stores are in crisis mode right now and what's causing it?"** | Combined crisis analysis (capacity + delivery), multi-tool orchestration |
+### 2. Chat Assistant
+Switch to Chat to demonstrate Cortex capabilities:
 
-### For Store Managers using the Streamlit App
-*(Front-line users of your "Manager's Co-Pilot")*
+| Sample Question | What It Shows |
+|-----------------|---------------|
+| "How does weather impact sales? What promos work best?" | Cortex Analyst - weather analysis with promo recommendations |
+| "What should we expect next Friday night? There's a football game nearby." | Demand forecasting with staffing recommendations |
+| "Why were sales lower than usual? What promo would help?" | Root cause analysis with actionable recommendations |
+| "What are customers saying? Show me happy and unhappy reviews." | Cortex Search - customer sentiment analysis |
 
-| # | Question | What It Demonstrates |
-|---|----------|---------------------|
-| 1 | **"Why were my sales lower than usual last night in this store?"** | Single-store root cause analysis |
-| 2 | **"What should I get ready for this Friday night shift?"** | Shift planning with weather, events, and historical patterns |
-| 3 | **"Are my delivery times getting worse, and what's causing it?"** | Week-over-week performance comparison with drivers |
-| 4 | **"What are the top 3 things I should fix this week to improve my store score?"** | Prioritized action items from KPIs + customer complaints |
-| 5 | **"Show me my happiest and unhappiest customers from the last 7 days and what they mentioned."** | Customer sentiment from feedback for a single store |
-
----
-
-## Data Model Overview
-
-### Dimension Tables
-| Table | Description |
-|-------|-------------|
-| DIM_STORES | 15 pizza stores across 5 regions |
-| DIM_PRODUCTS | 20 menu items (pizzas, sides, drinks) |
-| DIM_CAMPAIGNS | 10 marketing campaigns |
-| DIM_CUSTOMERS | 500 sample customers |
-| DIM_CALENDAR | 2025-2026 with events and weather |
-
-### Fact Tables
-| Table | Description | Records |
-|-------|-------------|---------|
-| FACT_ORDERS | Order transactions | ~60,000 |
-| FACT_ORDER_ITEMS | Line items with crust type | ~144,000 |
-| FACT_DELIVERIES | Delivery performance | ~20,000 |
-| FACT_INVENTORY | Daily inventory snapshots | ~24,000 |
-| FACT_STAFFING | Shift staffing data | ~20,000 |
-| FACT_KITCHEN_CAPACITY | Oven/production tracking | ~1,350 |
-| FACT_CAMPAIGN_PERFORMANCE | Campaign metrics | ~15,000 |
-
-### Pre-Joined Views (for Semantic Model)
-| View | Description |
-|------|-------------|
-| V_ORDERS | Orders + Store + Calendar |
-| V_DELIVERIES | Deliveries + Store + Calendar |
-| V_ORDER_ITEMS | Order Items + Product + Store + Calendar |
-| V_KITCHEN_CAPACITY | Kitchen Capacity + Store + Calendar |
-| V_STAFFING | Staffing + Store + Calendar |
-| V_INVENTORY | Inventory + Store + Product |
-| V_CAMPAIGN_PERFORMANCE | Campaigns + Performance metrics |
-
-### Document Types
-| Type | Count | Content |
-|------|-------|---------|
-| Invoices | 3 | Supplier delivery records |
-| Audits | 2 | Q4 2024 store quality audits |
-| Reviews | 1 | Customer reviews with ratings |
-| Feedback | 1 | Customer feedback summaries |
-| Maintenance | 1 | Kitchen equipment status reports |
+### 3. Dashboard View
+Historical analytics from Snowflake data:
+- Delivery performance metrics
+- Traffic patterns and hotspots
+- Late delivery analysis
 
 ---
 
-## Key Demo Story: Multi-City Capacity Crisis
+## Key Features
 
-The demo is built around a compelling multi-city operations crisis:
+### Weather Route Advisory
+The app shows weather-based routing recommendations:
 
-**The Question:** "Which stores are in crisis mode and what's causing it?"
+| Weather | Impact | Route Tips |
+|---------|--------|------------|
+| Cold | +20% delivery time | Avoid icy Lake Shore Dr, use salted main roads |
+| Rainy | +25% delivery time | Avoid lower Wacker Dr flooding |
+| Snowy | +50% delivery time | Stick to main streets only |
 
-**The Answer (discovered through AI):**
-
-| City | Store | Kitchen Capacity | Late Delivery % | Crisis Level | Root Cause |
-|------|-------|------------------|-----------------|--------------|------------|
-| Chicago | Chicago Loop | 45% | 44.0% | CRITICAL | Oven repair pending, temperature calibration |
-| Los Angeles | LA Downtown | 55% | 66.7% | CRITICAL | Exhaust fan failure - ovens offline |
-| New York | Manhattan Midtown | 62% | 48.0% | CRITICAL | Gas line issue - awaiting repair |
-| Miami | Miami Beach | 70% | 52.0% | CRITICAL | Electrical panel upgrade in progress |
-
-**Revenue Impact:** Over $15,000/month in lost revenue across 4 cities
-
-**Supporting Evidence:**
-- Cortex Analyst shows capacity constraints and delivery delays in structured data
-- Cortex Search finds maintenance reports detailing equipment failures
-- Customer reviews mention delivery delays and quality issues
+### Verified Queries
+The semantic model includes verified queries for consistent demo results:
+- Weather impact analysis
+- Friday game night forecasting  
+- Sales analysis with promo recommendations
 
 ---
 
-## Customization
+## Configuration
 
-### Adjusting Data Volume
-Modify the `GENERATOR(ROWCOUNT => N)` values in the load scripts to increase/decrease data volume.
+### Environment Variables (Optional)
 
-### Adding New Documents
-Insert new documents into `PIZZA_DOCUMENTS` table:
+| Variable | Description |
+|----------|-------------|
+| `SNOWFLAKE_ACCOUNT` | Your Snowflake account identifier |
+| `ORS_API_KEY` | OpenRouteService API key for real routing (optional) |
 
-```sql
-INSERT INTO PIZZA_INTELLIGENCE.DOCUMENTS.PIZZA_DOCUMENTS 
-VALUES ('DOC-ID', 'type', 'title', 'date', 'store_id', 
-        'full content...', 'summary');
+### Streamlit Secrets
+
+Configure in `.streamlit/secrets.toml`:
+
+```toml
+[connections.snowflake]
+account = "YOUR_ACCOUNT"
+user = "YOUR_USER"
+password = "YOUR_PASSWORD"
+warehouse = "COMPUTE_WH"
+database = "PIZZA_INTELLIGENCE"
+schema = "ANALYTICS"
 ```
-
-### Extending the Semantic Model
-Edit `pizza_intelligence.yaml` to add:
-- New dimensions or measures
-- Additional verified queries
-- More synonyms for natural language understanding
-
----
-
-## Partner Training Points
-
-This demo illustrates four partner revenue opportunities:
-
-1. **Kitchen Modernization** - Data ingestion and modeling
-2. **QSR Master Schema** - Semantic models as reusable IP
-3. **Governance & Safety** - Role design and access control
-4. **Manager's Co-Pilot** - Custom apps built on SI APIs
 
 ---
 
@@ -239,32 +166,36 @@ This demo illustrates four partner revenue opportunities:
 
 ### "No results found" errors
 - Run `10_test_demo_queries.sql` to verify data exists
-- Check that the semantic model YAML is uploaded to the stage
-- Ensure the Cortex Search service is created and has processed documents
+- Check semantic model is uploaded to stage
 
-### Date-related issues
-- Run `09_refresh_data.sql` to realign all date ranges
-- "Last Friday" queries require data for that specific date
+### Live Orders not updating
+- Check **Auto-refresh** checkbox is enabled
+- Click **Refresh** button manually
+- Click **Reset** to clear and restart
 
-### Slow query performance
-- Increase warehouse size temporarily
-- Check that tables have appropriate clustering
-
-### Agent not using both tools
-- Review orchestration instructions
-- Ensure both tools are properly configured in the agent
-- Test each tool individually first
+### Weather showing inconsistent values
+- The app uses simulated "Cold" weather to match historical data
+- Both Dashboard and Live Orders should show consistent weather
 
 ---
 
-## Support
+## Data Model
 
-For demo issues or questions:
-- Snowflake Intelligence documentation
-- Partner enablement resources
-- Your Snowflake account team
+### Key Tables
+| Table | Description |
+|-------|-------------|
+| V_ORDERS | Orders with store and calendar info |
+| V_DELIVERIES | Delivery performance metrics |
+| PIZZA_DOCUMENTS | Customer reviews and feedback |
+
+### Document Types
+| Type | Content |
+|------|---------|
+| Reviews | Customer feedback with ratings |
+| Audits | Store quality assessments |
+| Invoices | Supplier records |
 
 ---
 
-**Built for the Insight Kitchen Partner Demo**  
-*Snowflake Intelligence - From Data to Competitive Advantage*
+**Built for Snowflake Cortex Demo**  
+*Chicago Loop Pizza Operations*
