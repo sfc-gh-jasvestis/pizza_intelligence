@@ -238,6 +238,48 @@ ALTERNATE_ROUTES = {
     },
 }
 
+# Weather-based route recommendations
+WEATHER_ROUTE_ADJUSTMENTS = {
+    "Cold": {
+        "general_advice": "Cold weather slows traffic. Allow extra time.",
+        "route_tips": [
+            {"zone": "Lake Shore", "tip": "Avoid Lake Shore Dr - icy conditions near lake", "alt_route": "Use inner streets: Clark St or State St"},
+            {"zone": "Gold Coast", "tip": "Side streets may have black ice", "alt_route": "Stick to salted main roads: Michigan Ave → Oak St"},
+            {"zone": "River North", "tip": "Bridge decks freeze first", "alt_route": "Use Chicago Ave bridge (more traffic but safer)"},
+        ],
+        "delivery_tips": "Keep food in insulated bags. Customers may take longer to answer doors.",
+        "time_adjustment": 1.2,  # 20% longer deliveries
+    },
+    "Rainy": {
+        "general_advice": "Wet roads increase stopping distance. Drive cautiously.",
+        "route_tips": [
+            {"zone": "West Loop", "tip": "Flooding common on lower Wacker Dr", "alt_route": "Use upper Wacker or Adams St"},
+            {"zone": "Streeterville", "tip": "Poor visibility near lake", "alt_route": "Use Illinois St instead of Grand Ave"},
+            {"zone": "Loop Core", "tip": "Pedestrians jaywalking to avoid rain", "alt_route": "Use side streets, watch for umbrellas blocking view"},
+        ],
+        "delivery_tips": "Use rain covers for pizza bags. Watch for slippery building entrances.",
+        "time_adjustment": 1.25,  # 25% longer deliveries
+    },
+    "Snowy": {
+        "general_advice": "Snow significantly impacts all routes. Consider delaying non-urgent deliveries.",
+        "route_tips": [
+            {"zone": "ALL", "tip": "Avoid Lake Shore Dr completely", "alt_route": "Use Clark St or State St north-south"},
+            {"zone": "Gold Coast", "tip": "Steep grades on side streets", "alt_route": "Approach from Division St, not North Ave"},
+            {"zone": "West Loop", "tip": "Unplowed side streets", "alt_route": "Stick to Randolph St and Madison St"},
+        ],
+        "delivery_tips": "Allow 50% extra time. Confirm customer is home before leaving store.",
+        "time_adjustment": 1.5,  # 50% longer deliveries
+    },
+    "Sunny": {
+        "general_advice": "Good conditions. Watch for sun glare during golden hour.",
+        "route_tips": [
+            {"zone": "Lake Shore", "tip": "Sun glare eastbound in morning, westbound in evening", "alt_route": "Wear sunglasses, use visor"},
+        ],
+        "delivery_tips": "Great day for deliveries! Keep pizzas shaded in car.",
+        "time_adjustment": 1.0,  # No adjustment
+    },
+}
+
 # Order stages with expected durations (in seconds for demo speed)
 ORDER_STAGES = [
     {"id": "received", "label": "Order Received", "icon": "📥", "duration": 3},
@@ -2345,6 +2387,27 @@ def render_live_orders():
         status_text = "⚪ Pipeline Stopped"
     
     st.caption(f"{status_text} | {w_icon} {weather_condition} | 📍 Chicago Loop Pizza")
+    
+    # Weather-based route advisory (collapsible)
+    weather_adjustments = WEATHER_ROUTE_ADJUSTMENTS.get(weather_condition, {})
+    if weather_adjustments:
+        with st.expander(f"🚗 Weather Route Advisory: {weather_condition}", expanded=False):
+            st.markdown(f"**{weather_adjustments.get('general_advice', '')}**")
+            
+            route_tips = weather_adjustments.get('route_tips', [])
+            if route_tips:
+                st.markdown("**Route Adjustments:**")
+                for tip in route_tips:
+                    st.markdown(f"• **{tip['zone']}**: {tip['tip']}")
+                    st.caption(f"  → {tip['alt_route']}")
+            
+            delivery_tip = weather_adjustments.get('delivery_tips', '')
+            if delivery_tip:
+                st.info(f"💡 **Driver Tip:** {delivery_tip}")
+            
+            time_adj = weather_adjustments.get('time_adjustment', 1.0)
+            if time_adj > 1.0:
+                st.warning(f"⏱️ Expect {int((time_adj - 1) * 100)}% longer delivery times")
     
     st.divider()
     
