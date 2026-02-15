@@ -18,6 +18,7 @@ import random
 import pydeck as pdk
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
+from streamlit_autorefresh import st_autorefresh
 
 # Import pizza pipeline services
 import sys
@@ -31,7 +32,7 @@ try:
     from services.driver_dispatch import DriverDispatch
     from services.analytics_pipeline import AnalyticsPipeline
     from services.weather_service import get_weather_service, WeatherData
-    from config.settings import LOYALTY_TIERS, SIMULATION_CONFIG, MAP_CONFIG, STORE_CONFIG, TRAFFIC_BY_HOUR
+    from config.settings import LOYALTY_TIERS, SIMULATION_CONFIG, MAP_CONFIG, STORE_CONFIG, TRAFFIC_BY_HOUR, DELIVERY_ZONES
     PIPELINE_AVAILABLE = True
 except ImportError as e:
     PIPELINE_AVAILABLE = False
@@ -88,7 +89,7 @@ API_TIMEOUT = 60000  # milliseconds
 DEMO_QUESTIONS = [
     {
         "label": "Why were sales low?",
-        "question": "Why were my sales lower than usual? What promo would help boost sales given the upcoming weather?",
+        "question": "Why were my sales lower than usual last week? What's causing the drop and what promo would help?",
         "icon": "trending_down",
         "color": "red",
         "type": "both"  # Sales data + customer feedback + promo suggestion
@@ -128,7 +129,7 @@ DEMO_QUESTIONS = [
 # =============================================================================
 
 # Chicago Loop store location
-STORE_LOCATION = {"lat": 41.8819, "lon": -87.6278, "name": "Chicago Loop"}
+STORE_LOCATION = {"lat": 41.8827, "lon": -87.6233, "name": "Chicago Loop Pizza"}
 
 # Sample customer names
 CUSTOMER_NAMES = [
@@ -137,16 +138,15 @@ CUSTOMER_NAMES = [
     "William Brown", "Amanda Martinez", "Christopher Davis", "Jessica Moore"
 ]
 
-# Sample pizza items
+# Sample pizza items - aligned with PIZZA_INTELLIGENCE.ANALYTICS.DIM_PRODUCTS
 PIZZA_ITEMS = [
-    {"name": "Pepperoni Classic", "prep_time": 8, "price": 18.99},
-    {"name": "Margherita", "prep_time": 6, "price": 16.99},
-    {"name": "BBQ Chicken", "prep_time": 10, "price": 21.99},
-    {"name": "Veggie Supreme", "prep_time": 9, "price": 19.99},
-    {"name": "Meat Lovers", "prep_time": 11, "price": 23.99},
-    {"name": "Hawaiian", "prep_time": 7, "price": 17.99},
-    {"name": "Buffalo Chicken", "prep_time": 9, "price": 20.99},
-    {"name": "Four Cheese", "prep_time": 7, "price": 18.99},
+    {"name": "Classic Pepperoni", "prep_time": 12, "price": 18.99},
+    {"name": "Margherita", "prep_time": 10, "price": 16.99},
+    {"name": "BBQ Chicken", "prep_time": 14, "price": 21.99},
+    {"name": "Veggie Garden", "prep_time": 11, "price": 17.99},
+    {"name": "Meat Lovers", "prep_time": 15, "price": 23.99},
+    {"name": "Hawaiian Paradise", "prep_time": 11, "price": 18.99},
+    {"name": "Supreme Deluxe", "prep_time": 14, "price": 22.99},
 ]
 
 # Sample delivery addresses near Chicago Loop with risk indicators
@@ -294,6 +294,39 @@ WEATHER_ROUTE_ADJUSTMENTS = {
     },
 }
 
+# Chicago Loop Traffic Hotspots - areas drivers should avoid
+# These are real Chicago intersections/areas known for congestion
+TRAFFIC_HOTSPOTS = {
+    "always": [  # Always congested
+        {"name": "I-90/94 Junction", "lat": 41.8756, "lon": -87.6244, "radius": 350, "reason": "Highway interchange"},
+        {"name": "Michigan & Wacker", "lat": 41.8870, "lon": -87.6245, "radius": 250, "reason": "Tourist congestion"},
+    ],
+    "rush_hour": [  # Rush hour (7-9 AM, 4-7 PM)
+        {"name": "Lake Shore Dr & Ohio", "lat": 41.8920, "lon": -87.6130, "radius": 300, "reason": "Commuter backup"},
+        {"name": "Congress Pkwy", "lat": 41.8754, "lon": -87.6290, "radius": 280, "reason": "Highway merge"},
+        {"name": "Chicago & State", "lat": 41.8967, "lon": -87.6280, "radius": 200, "reason": "Transit hub"},
+        {"name": "Clark & Division", "lat": 41.9040, "lon": -87.6315, "radius": 220, "reason": "Nightlife district"},
+    ],
+    "lunch": [  # Lunch hour (11 AM - 2 PM)
+        {"name": "Randolph & Michigan", "lat": 41.8846, "lon": -87.6246, "radius": 200, "reason": "Millennium Park lunch rush"},
+        {"name": "Adams & Wacker", "lat": 41.8792, "lon": -87.6370, "radius": 180, "reason": "Willis Tower lunch crowd"},
+        {"name": "Hubbard & Clark", "lat": 41.8898, "lon": -87.6310, "radius": 180, "reason": "River North restaurants"},
+    ],
+    "weekend": [  # Weekend specific
+        {"name": "Navy Pier area", "lat": 41.8917, "lon": -87.6059, "radius": 400, "reason": "Tourist attraction"},
+        {"name": "Magnificent Mile", "lat": 41.8950, "lon": -87.6245, "radius": 300, "reason": "Shopping traffic"},
+    ],
+}
+
+# Alternative routes to avoid hotspots
+AVOIDANCE_ROUTES = {
+    "I-90/94 Junction": {"avoid_via": "Halsted St", "detour_coords": [[-87.6465, 41.8756], [-87.6465, 41.8820]]},
+    "Michigan & Wacker": {"avoid_via": "State St", "detour_coords": [[-87.6280, 41.8850], [-87.6280, 41.8900]]},
+    "Lake Shore Dr & Ohio": {"avoid_via": "Clark St", "detour_coords": [[-87.6310, 41.8920], [-87.6310, 41.8980]]},
+    "Congress Pkwy": {"avoid_via": "Harrison St", "detour_coords": [[-87.6290, 41.8740], [-87.6350, 41.8740]]},
+    "Navy Pier area": {"avoid_via": "Illinois St", "detour_coords": [[-87.6150, 41.8907], [-87.6200, 41.8907]]},
+}
+
 # Order stages with expected durations (in seconds for demo speed)
 ORDER_STAGES = [
     {"id": "received", "label": "Order Received", "icon": "📥", "duration": 3},
@@ -334,57 +367,130 @@ def generate_random_order():
     }
 
 
-def get_route_coordinates(start_lon: float, start_lat: float, end_lon: float, end_lat: float) -> List[List[float]]:
-    """
-    Fetch driving route from OpenRouteService API.
-    Returns list of [lon, lat] coordinates for the route.
-    Falls back to direct line if API fails.
-    """
-    # OpenRouteService free API (5000 requests/day)
-    # Get your free key at: https://openrouteservice.org/dev/#/signup
-    ORS_API_KEY = os.environ.get("ORS_API_KEY", None)
+def get_active_traffic_hotspots() -> List[dict]:
+    """Get currently active traffic hotspots based on time of day and day of week."""
+    now = datetime.now()
+    hour = now.hour
+    is_weekend = now.weekday() >= 5  # Saturday = 5, Sunday = 6
     
-    # If no API key, return direct line with curve
-    if not ORS_API_KEY:
-        mid_lon = (start_lon + end_lon) / 2 + 0.002
-        mid_lat = (start_lat + end_lat) / 2 + 0.001
-        return [
-            [start_lon, start_lat],
-            [mid_lon, mid_lat],
-            [end_lon, end_lat]
-        ]
+    active = list(TRAFFIC_HOTSPOTS["always"])  # Always include these
     
-    try:
-        url = "https://api.openrouteservice.org/v2/directions/driving-car"
-        headers = {
-            "Authorization": ORS_API_KEY,
-            "Content-Type": "application/json"
-        }
-        body = {
-            "coordinates": [[start_lon, start_lat], [end_lon, end_lat]],
-            "format": "geojson"
-        }
+    # Add time-based hotspots
+    if 7 <= hour <= 9 or 16 <= hour <= 19:  # Rush hour
+        active.extend(TRAFFIC_HOTSPOTS["rush_hour"])
+    
+    if 11 <= hour <= 14:  # Lunch hour
+        active.extend(TRAFFIC_HOTSPOTS["lunch"])
+    
+    if is_weekend:  # Weekend
+        active.extend(TRAFFIC_HOTSPOTS["weekend"])
+    
+    return active
+
+
+def point_near_hotspot(lon: float, lat: float, hotspots: List[dict], threshold_km: float = 0.3) -> Optional[dict]:
+    """Check if a point is near any hotspot. Returns the hotspot if found, None otherwise."""
+    for hotspot in hotspots:
+        # Simple distance calculation (approx km at Chicago latitude)
+        dlat = (lat - hotspot["lat"]) * 111  # ~111 km per degree latitude
+        dlon = (lon - hotspot["lon"]) * 85   # ~85 km per degree longitude at 41.8°N
+        dist_km = (dlat**2 + dlon**2) ** 0.5
         
-        response = requests.post(url, json=body, headers=headers, timeout=5)
+        if dist_km < threshold_km:
+            return hotspot
+    return None
+
+
+def get_route_coordinates(start_lon: float, start_lat: float, end_lon: float, end_lat: float) -> tuple:
+    """
+    Generate a driving route that avoids traffic hotspots.
+    Returns tuple of (route_coords, avoided_hotspots, alternative_route_name).
+    """
+    active_hotspots = get_active_traffic_hotspots()
+    avoided = []
+    alt_route_name = None
+    
+    # Check if direct path passes through any hotspots
+    # Sample points along the direct path
+    num_samples = 5
+    for i in range(num_samples + 1):
+        t = i / num_samples
+        sample_lon = start_lon + t * (end_lon - start_lon)
+        sample_lat = start_lat + t * (end_lat - start_lat)
         
-        if response.status_code == 200:
-            data = response.json()
-            # Extract coordinates from GeoJSON response
-            coords = data["features"][0]["geometry"]["coordinates"]
-            return coords
-        else:
-            # API failed, return direct line
-            return [[start_lon, start_lat], [end_lon, end_lat]]
-    except Exception as e:
-        # On error, return direct line with some intermediate points
-        # Create a slight curve to make it look more like a route
-        mid_lon = (start_lon + end_lon) / 2 + 0.002
-        mid_lat = (start_lat + end_lat) / 2 + 0.001
-        return [
-            [start_lon, start_lat],
-            [mid_lon, mid_lat],
-            [end_lon, end_lat]
-        ]
+        hotspot = point_near_hotspot(sample_lon, sample_lat, active_hotspots)
+        if hotspot and hotspot not in avoided:
+            avoided.append(hotspot)
+    
+    # Generate route - either avoiding hotspots or direct
+    if avoided:
+        # Get avoidance route info
+        for hotspot in avoided:
+            if hotspot["name"] in AVOIDANCE_ROUTES:
+                alt_route_name = AVOIDANCE_ROUTES[hotspot["name"]]["avoid_via"]
+                break
+        
+        # Generate a curved route that goes around hotspots
+        route = generate_avoidance_route(start_lon, start_lat, end_lon, end_lat, avoided)
+    else:
+        # No hotspots to avoid - generate normal curved route
+        route = generate_simple_route(start_lon, start_lat, end_lon, end_lat)
+    
+    return route, avoided, alt_route_name
+
+
+def generate_avoidance_route(start_lon: float, start_lat: float, end_lon: float, end_lat: float, 
+                             hotspots_to_avoid: List[dict]) -> List[List[float]]:
+    """Generate a route that curves away from hotspots."""
+    # Calculate the centroid of hotspots to avoid
+    if not hotspots_to_avoid:
+        return generate_simple_route(start_lon, start_lat, end_lon, end_lat)
+    
+    hotspot_lon = sum(h["lon"] for h in hotspots_to_avoid) / len(hotspots_to_avoid)
+    hotspot_lat = sum(h["lat"] for h in hotspots_to_avoid) / len(hotspots_to_avoid)
+    
+    # Calculate midpoint of direct route
+    mid_lon = (start_lon + end_lon) / 2
+    mid_lat = (start_lat + end_lat) / 2
+    
+    # Push the midpoint away from the hotspot centroid
+    push_lon = mid_lon - hotspot_lon
+    push_lat = mid_lat - hotspot_lat
+    push_dist = (push_lon**2 + push_lat**2) ** 0.5
+    
+    if push_dist > 0.001:  # Avoid division by zero
+        # Normalize and scale the push
+        push_scale = 0.008  # How far to deviate (in degrees, ~0.8km)
+        adjusted_mid_lon = mid_lon + (push_lon / push_dist) * push_scale
+        adjusted_mid_lat = mid_lat + (push_lat / push_dist) * push_scale
+    else:
+        # Hotspot is at midpoint, push perpendicular to route
+        route_dx = end_lon - start_lon
+        route_dy = end_lat - start_lat
+        # Perpendicular vector
+        adjusted_mid_lon = mid_lon - route_dy * 0.15
+        adjusted_mid_lat = mid_lat + route_dx * 0.15
+    
+    # Generate multi-point route for smoother curve
+    return [
+        [start_lon, start_lat],
+        [start_lon + (adjusted_mid_lon - start_lon) * 0.4, start_lat + (adjusted_mid_lat - start_lat) * 0.4],
+        [adjusted_mid_lon, adjusted_mid_lat],
+        [adjusted_mid_lon + (end_lon - adjusted_mid_lon) * 0.6, adjusted_mid_lat + (end_lat - adjusted_mid_lat) * 0.6],
+        [end_lon, end_lat]
+    ]
+
+
+def generate_simple_route(start_lon: float, start_lat: float, end_lon: float, end_lat: float) -> List[List[float]]:
+    """Generate a simple curved route (no hotspots to avoid)."""
+    # Create a slight curve to make it look more like a real route
+    mid_lon = (start_lon + end_lon) / 2 + 0.002
+    mid_lat = (start_lat + end_lat) / 2 + 0.001
+    return [
+        [start_lon, start_lat],
+        [mid_lon, mid_lat],
+        [end_lon, end_lat]
+    ]
 
 
 def get_driver_position(route_coords: List[List[float]], progress: float) -> dict:
@@ -426,16 +532,33 @@ def get_driver_position(route_coords: List[List[float]], progress: float) -> dic
 # SNOWFLAKE CONNECTION
 # =============================================================================
 
-def get_snowflake_connection():
-    """Get or create Snowflake connection."""
+def get_snowflake_connection(force_refresh: bool = False):
+    """Get or create Snowflake connection. Handles session expiration."""
+    if force_refresh and "snowflake_conn" in st.session_state:
+        del st.session_state.snowflake_conn
+    
     if "snowflake_conn" not in st.session_state:
         try:
             conn = st.connection("snowflake")
             st.session_state.snowflake_conn = conn
+            st.session_state.snowflake_conn_time = time.time()
         except Exception as e:
             st.error(f"Failed to connect to Snowflake: {e}")
             st.info("Please configure your Snowflake connection in `.streamlit/secrets.toml`")
             st.stop()
+    
+    # Check if connection might be stale (older than 50 minutes)
+    conn_time = st.session_state.get("snowflake_conn_time", 0)
+    if time.time() - conn_time > 3000:  # 50 minutes
+        try:
+            # Test the connection with a simple query
+            conn = st.session_state.snowflake_conn
+            conn.session().sql("SELECT 1").collect()
+        except Exception:
+            # Connection is stale, refresh it
+            del st.session_state.snowflake_conn
+            return get_snowflake_connection(force_refresh=True)
+    
     return st.session_state.snowflake_conn
 
 
@@ -479,23 +602,26 @@ def generate_manager_insights(question: str, data_summary: str, store_name: str)
     conn = get_snowflake_connection()
     
     prompt = f"""You are a helpful assistant for a pizza store manager at {store_name}.
-Based on the following data, provide 2-3 brief, actionable recommendations.
-Be concise and practical - this manager needs to know WHAT TO DO.
+Based on the data below, provide actionable recommendations in table format.
 
 Question asked: {question}
 
 Data retrieved:
 {data_summary}
 
-Provide your response in this format:
-📊 **Key Insight:** [One sentence summary of what the data shows]
+Provide your response using markdown tables:
 
-✅ **Recommended Actions:**
-1. [First specific action]
-2. [Second specific action]
-3. [Third specific action if needed]
+### 📊 Key Insight
+[One sentence summary of what the data shows]
 
-Keep it brief and actionable. No more than 100 words total."""
+### ✅ Recommended Actions
+| Priority | Action | Expected Impact |
+|----------|--------|-----------------|
+| 1 | [specific action] | [benefit] |
+| 2 | [specific action] | [benefit] |
+| 3 | [specific action] | [benefit] |
+
+Keep it brief and actionable. Use REAL numbers from the data."""
 
     # Escape single quotes for SQL
     escaped_prompt = prompt.replace("'", "''").replace("\\", "\\\\")
@@ -625,24 +751,35 @@ You have TWO sources of information:
 **2. DOCUMENTS (from search):**
 {docs_text}
 
-Provide a UNIFIED answer that combines insights from both sources in this format:
+Provide a UNIFIED answer using markdown tables for readability:
 
-📊 **Data Summary:**
-[Summarize what the numbers/data show - be specific with metrics]
+### 📊 Key Metrics
+| Metric | Value | Note |
+|--------|-------|------|
+| Expected Orders | [number] | [comparison to normal] |
+| Revenue Forecast | [amount] | [trend] |
+| Avg Order Size | [amount] | [vs normal] |
+| Peak Hours | [times] | [staffing impact] |
 
-📋 **Document Insights:**
-[Key findings from relevant documents - inventory needs, calendar events, audit findings, etc.]
+### 📋 Intelligence from Documents
+| Source | Key Finding |
+|--------|-------------|
+| [doc type] | [finding 1] |
+| [doc type] | [finding 2] |
+| [doc type] | [finding 3] |
 
-🎯 **Recommended Actions:**
-1. [Action based on data]
-2. [Action based on documents]
-3. [Additional action if needed]
+### 🎯 Action Plan
+| Priority | Category | Action | Why |
+|----------|----------|--------|-----|
+| 1 | Staffing | [action] | [reason] |
+| 2 | Inventory | [action] | [reason] |
+| 3 | Operations | [action] | [reason] |
 
 IMPORTANT:
-- Combine insights from BOTH data and documents
-- Be specific with numbers, dates, and item names
-- If the question has multiple parts, answer ALL of them
-- Keep total response under 250 words"""
+- Use REAL numbers from the data - no placeholders
+- Include 3-5 rows per table based on available data
+- Be specific with item names, quantities, and times
+- Keep it concise and actionable"""
 
     escaped_prompt = prompt.replace("'", "''").replace("\\", "\\\\")
     
@@ -869,12 +1006,13 @@ def detect_query_type(question: str) -> str:
 # CORTEX ANALYST API
 # =============================================================================
 
-def send_analyst_message(messages: List[Dict]) -> Dict[str, Any]:
+def send_analyst_message(messages: List[Dict], retry_on_auth_error: bool = True) -> Dict[str, Any]:
     """
     Send a message to Cortex Analyst API and return the response.
     
     Args:
         messages: Conversation history in Cortex Analyst format
+        retry_on_auth_error: Whether to retry with fresh connection on auth error
         
     Returns:
         API response with analyst message and metadata
@@ -909,12 +1047,23 @@ def send_analyst_message(messages: List[Dict]) -> Dict[str, Any]:
             result = response.json()
             result["request_id"] = request_id
             return result
+        elif response.status_code in (401, 403) and retry_on_auth_error:
+            # Session expired - try to refresh connection and retry once
+            get_snowflake_connection(force_refresh=True)
+            return send_analyst_message(messages, retry_on_auth_error=False)
         else:
             error_data = response.json() if response.text else {}
+            error_msg = error_data.get('message', response.text)
+            
+            # Check for session expiration in error message
+            if retry_on_auth_error and ('session' in error_msg.lower() or 'expired' in error_msg.lower() or 'token' in error_msg.lower()):
+                get_snowflake_connection(force_refresh=True)
+                return send_analyst_message(messages, retry_on_auth_error=False)
+            
             raise Exception(
                 f"API Error (request_id: {request_id})\n"
                 f"Status: {response.status_code}\n"
-                f"Message: {error_data.get('message', response.text)}"
+                f"Message: {error_msg}"
             )
             
     except requests.exceptions.Timeout:
@@ -1534,6 +1683,9 @@ def process_user_question(question: str, force_type: Optional[str] = None):
     # Process based on query type
     with st.chat_message("assistant", avatar=":material/robot:"):
         if query_type == "search":
+            # Show Cortex badges
+            # Cortex badges removed for cleaner UI
+            
             # Use Cortex Search for document queries
             with st.spinner("Searching documents..."):
                 try:
@@ -1676,6 +1828,9 @@ def process_user_question(question: str, force_type: Optional[str] = None):
             })
         
         else:
+            # Show Cortex badges for analyst + LLM
+            # Badges removed for cleaner UI
+            
             # Default: Use Cortex Analyst for structured data
             with st.spinner("Analyzing your question..."):
                 try:
@@ -2039,148 +2194,6 @@ def get_delivery_stats(store_name: str) -> dict:
     }
 
 
-def render_dashboard(store_name: str):
-    """Render the traffic map and weather dashboard."""
-    
-    # Quick Stats Row
-    stats = get_delivery_stats(store_name)
-    weather = get_weather_stats(store_name)
-    
-    # Show data source breakdown if pipeline is running
-    if stats.get('pipeline_total', 0) > 0:
-        st.subheader("📊 Combined Overview (Historical + Live)")
-        st.caption(f"📂 Historical (Snowflake): {stats['sf_total']} deliveries | 🔴 Live Today: {stats['pipeline_total']} deliveries")
-    else:
-        st.subheader("📊 Last 7 Days Overview")
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    with col1:
-        st.metric("Total Deliveries", stats['total'])
-    with col2:
-        st.metric("Late Deliveries", stats['late'], f"{stats['late_pct']}%")
-    with col3:
-        st.metric("Avg Delivery Time", f"{stats['avg_duration']} min")
-    with col4:
-        st.metric("Avg Rating", f"⭐ {stats['avg_rating']}")
-    with col5:
-        st.metric("Weather", f"{weather['icon']} {weather['condition']}")
-    
-    st.divider()
-    
-    # Map and Details in two columns
-    map_col, details_col = st.columns([2, 1])
-    
-    with map_col:
-        st.subheader("🗺️ Delivery Traffic Map")
-        
-        # Get delivery data with coordinates
-        map_data = get_delivery_map_data(store_name)
-        
-        if not map_data.empty:
-            # Separate on-time and late deliveries for display
-            late_deliveries = map_data[map_data['IS_LATE'] == True]
-            ontime_deliveries = map_data[map_data['IS_LATE'] == False]
-            
-            # View selector
-            view_option = st.radio(
-                "Filter deliveries:",
-                ["All Deliveries", "Late Only", "On-Time Only"],
-                horizontal=True,
-                key="map_view_selector"
-            )
-            
-            # Filter data based on selection
-            if view_option == "Late Only":
-                display_data = late_deliveries
-                map_color = '#ff4444'
-            elif view_option == "On-Time Only":
-                display_data = ontime_deliveries
-                map_color = '#44ff44'
-            else:
-                display_data = map_data
-                map_color = '#4444ff'
-            
-            # Store the filtered data in session state for the breakdown
-            st.session_state.filtered_deliveries = display_data
-            
-            if not display_data.empty:
-                st.map(display_data[['lat', 'lon']], zoom=12, color=map_color)
-                st.caption(f"Showing {len(display_data)} deliveries")
-            else:
-                st.info(f"No {view_option.lower().replace(' only', '')} deliveries to show.")
-        else:
-            st.info("No delivery data available for mapping.")
-            st.session_state.filtered_deliveries = pd.DataFrame()
-    
-    with details_col:
-        # Use filtered data if available
-        filtered_data = st.session_state.get('filtered_deliveries', pd.DataFrame())
-        view_option = st.session_state.get('map_view_selector', 'All Deliveries')
-        
-        if view_option == "Late Only":
-            # LATE ONLY VIEW: Show delay breakdown
-            st.subheader("⚠️ Late Delivery Causes")
-            st.caption("_Late = exceeded 35 min promise_")
-            
-            if not filtered_data.empty and 'LATE_REASON' in filtered_data.columns:
-                breakdown = filtered_data.groupby('LATE_REASON').agg({
-                    'DELIVERY_ID': 'count',
-                    'LATE_MINUTES': 'mean'
-                }).reset_index()
-                breakdown.columns = ['LATE_REASON', 'COUNT', 'AVG_DELAY']
-                breakdown = breakdown.sort_values('COUNT', ascending=False)
-                total = breakdown['COUNT'].sum()
-                
-                for _, row in breakdown.iterrows():
-                    reason = str(row['LATE_REASON']).replace('_', ' ').title()
-                    count = int(row['COUNT'])
-                    pct = (count / total * 100) if total > 0 else 0
-                    avg_delay = round(row['AVG_DELAY'], 1) if row['AVG_DELAY'] else 0
-                    
-                    icons = {'Traffic': '🚗', 'Weather': '🌧️', 'Driver Shortage': '👤', 
-                             'Kitchen Delay': '🍕', 'High Demand': '📈', 'Address Issue': '📍',
-                             'Bad Weather': '🌧️'}
-                    icon = icons.get(reason, '⚠️')
-                    
-                    st.markdown(f"{icon} **{reason}** — {count} ({pct:.0f}%) | +{avg_delay} min avg")
-                    st.progress(pct / 100)
-            else:
-                st.info("No late deliveries to analyze")
-                
-        elif view_option == "On-Time Only":
-            # ON-TIME VIEW: Simple success stats
-            st.subheader("✅ On-Time Stats")
-            st.caption("_On-time = delivered within 35 min promise_")
-            
-            if not filtered_data.empty:
-                st.metric("Count", len(filtered_data))
-            else:
-                st.info("No on-time deliveries")
-                
-        else:
-            # ALL DELIVERIES VIEW: Focus on actionable insights
-            st.subheader("🎯 Focus Areas")
-            
-            factors = get_performance_factors(store_name)
-            
-            if not factors['late_reasons'].empty:
-                total_late = factors['late_reasons']['COUNT'].sum()
-                
-                # Show top 3 issues with visual bars
-                for _, row in factors['late_reasons'].head(3).iterrows():
-                    reason = str(row['LATE_REASON']).replace('_', ' ').title()
-                    count = int(row['COUNT'])
-                    pct = (count / total_late * 100) if total_late > 0 else 0
-                    
-                    icons = {'Kitchen Delay': '🍕', 'High Demand': '📈', 'Traffic': '🚗',
-                             'Driver Shortage': '👤', 'Bad Weather': '🌧️', 'Address Issue': '📍'}
-                    icon = icons.get(reason, '⚠️')
-                    
-                    st.markdown(f"{icon} **{reason}** — {count} late ({pct:.0f}%)")
-                    st.progress(pct / 100)
-
-
 # =============================================================================
 # LIVE ORDER TRACKING - INTEGRATED PIPELINE
 # =============================================================================
@@ -2266,21 +2279,26 @@ def render_live_orders():
     dispatch = st.session_state.pipeline_dispatch
     analytics = st.session_state.pipeline_analytics
     
-    # Get weather
+    # Get weather (check for demo override first)
     try:
-        weather_service = get_weather_service()
-        weather = weather_service.get_current_weather()
-        weather_condition = weather.condition if weather else "Clear"
+        if st.session_state.get("demo_weather"):
+            # Use demo weather override
+            weather_condition = st.session_state.demo_weather
+            weather = None  # Will use condition-based logic
+        else:
+            weather_service = get_weather_service()
+            weather = weather_service.get_current_weather()
+            weather_condition = weather.condition if weather else "Clear"
     except:
         weather = None
-        weather_condition = "Clear"
+        weather_condition = st.session_state.get("demo_weather", "Clear")
     
     # =========================================================================
     # HEADER & CONTROLS
     # =========================================================================
     
     # Control buttons - simple row
-    col_btn1, col_btn2, col_btn3, col_btn4 = st.columns([1, 1, 1, 1])
+    col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
     
     with col_btn1:
         if st.button("🍕 New Order", use_container_width=True):
@@ -2316,8 +2334,8 @@ def render_live_orders():
             
             st.rerun()
     
-    with col_btn4:
-        auto_refresh = st.checkbox("Auto-refresh", value=False, help="Refresh every 3 seconds")
+    # Auto-refresh every 3 seconds (always on for live demo)
+    st_autorefresh(interval=3000, limit=None, key="live_orders_refresh")
     
     # =========================================================================
     # HERO METRICS
@@ -2397,6 +2415,50 @@ def render_live_orders():
     col3.metric("🚗 Active Deliveries", len(active_deliveries))
     col4.metric("⏱️ Avg Delivery", f"{avg_time:.0f} min" if avg_time > 0 else "—")
     
+    # AI Saved Counter - calculate savings from on-time deliveries and routing
+    if completed_count > 0:
+        # Calculate AI value metrics
+        # Assume: each late delivery costs $15 (refund/compensation), AI routing saves 3 min per delivery
+        baseline_late_rate = 0.25  # Industry average 25% late without AI
+        expected_late = int(completed_count * baseline_late_rate)
+        actual_late = late_count
+        prevented_late = max(0, expected_late - actual_late)
+        money_saved = prevented_late * 15  # $15 per prevented late delivery
+        time_saved = completed_count * 3  # 3 min saved per delivery via smart routing
+        
+        # Track cumulative savings in session state
+        if "ai_money_saved" not in st.session_state:
+            st.session_state.ai_money_saved = 0
+            st.session_state.ai_time_saved = 0
+        st.session_state.ai_money_saved = money_saved
+        st.session_state.ai_time_saved = time_saved
+        
+        # Display AI Impact banner
+        st.markdown(f"""
+        <div style="background: linear-gradient(90deg, #29B5E8 0%, #0068C9 100%); padding: 12px 20px; border-radius: 8px; margin: 10px 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; color: white;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 20px;">🤖</span>
+                    <span style="font-weight: 600;">AI Impact Today</span>
+                </div>
+                <div style="display: flex; gap: 30px;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: 700;">${money_saved}</div>
+                        <div style="font-size: 11px; opacity: 0.9;">Saved in Refunds</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: 700;">{time_saved} min</div>
+                        <div style="font-size: 11px; opacity: 0.9;">Routing Efficiency</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: 700;">{prevented_late}</div>
+                        <div style="font-size: 11px; opacity: 0.9;">Late Orders Prevented</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
     # Weather & Status bar - check actual thread health
     # Use consistent icons with global WEATHER_ICONS (lowercase key lookup)
     w_icon = WEATHER_ICONS.get(weather_condition.lower() if weather_condition else "clear", "🌤️")
@@ -2410,32 +2472,63 @@ def render_live_orders():
         ) and (
             analytics.is_alive() if hasattr(analytics, 'is_alive') else analytics.running
         )
-        status_text = "🟢 Pipeline Running" if all_alive else "🟡 Recovering..."
-    else:
-        status_text = "⚪ Pipeline Stopped"
     
-    st.caption(f"{status_text} | {w_icon} {weather_condition} | 📍 Chicago Loop Pizza")
+    # Show active demo scenario indicator
+    demo_weather = st.session_state.get("demo_weather")
+    demo_rush = st.session_state.get("demo_rush_hour")
+    if demo_weather or demo_rush:
+        scenario_parts = []
+        if demo_weather:
+            weather_icons = {"Rainy": "🌧️", "Snowy": "❄️"}
+            scenario_parts.append(f"{weather_icons.get(demo_weather, '🌤️')} {demo_weather} Weather")
+        if demo_rush:
+            scenario_parts.append("🚗 Rush Hour Traffic")
+        
+        st.markdown(f"""
+        <div style="background: #FF6B35; padding: 8px 16px; border-radius: 6px; margin: 5px 0;">
+            <span style="color: white; font-weight: 500;">🎬 Demo Scenario Active: {" • ".join(scenario_parts)}</span>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Weather-based route advisory (collapsible)
+    # Weather-based route advisory (always visible, compact)
     weather_adjustments = WEATHER_ROUTE_ADJUSTMENTS.get(weather_condition, {})
     if weather_adjustments:
-        with st.expander(f"🚗 Weather Route Advisory: {weather_condition}", expanded=False):
-            st.markdown(f"**{weather_adjustments.get('general_advice', '')}**")
+        st.markdown(f"**🚗 Weather Route Advisory: {weather_condition}**")
+        advice_text = weather_adjustments.get('general_advice', '')
+        route_tips = weather_adjustments.get('route_tips', [])
+        time_adj = weather_adjustments.get('time_adjustment', 1.0)
+        
+        # Compact display
+        advice_parts = [advice_text] if advice_text else []
+        if route_tips:
+            tip_text = " | ".join([f"**{tip['zone']}**: {tip['tip']}" for tip in route_tips[:2]])
+            advice_parts.append(tip_text)
+        if time_adj > 1.0:
+            advice_parts.append(f"⏱️ +{int((time_adj - 1) * 100)}% delivery times")
+        
+        st.caption(" • ".join(advice_parts) if advice_parts else "Normal conditions")
+    
+    # Traffic Hotspots for Drivers (based on time of day)
+    current_hour = datetime.now().hour
+    is_rush_hour = (7 <= current_hour <= 9) or (16 <= current_hour <= 19)
+    is_lunch_rush = (11 <= current_hour <= 13)
+    
+    if is_rush_hour or is_lunch_rush:
+        # Show traffic alerts for high-risk zones
+        rush_type = "Rush Hour" if is_rush_hour else "Lunch Rush"
+        hotspot_zones = [zone for zone, info in DELIVERY_ZONES.items() if info.get("risk_level") == "high"]
+        
+        if hotspot_zones:
+            hotspot_tips = []
+            for zone in hotspot_zones[:3]:  # Show top 3
+                zone_info = DELIVERY_ZONES[zone]
+                alt = zone_info.get("alternate_route")
+                if alt:
+                    hotspot_tips.append(f"**{zone}**: {alt}")
             
-            route_tips = weather_adjustments.get('route_tips', [])
-            if route_tips:
-                st.markdown("**Route Adjustments:**")
-                for tip in route_tips:
-                    st.markdown(f"• **{tip['zone']}**: {tip['tip']}")
-                    st.caption(f"  → {tip['alt_route']}")
-            
-            delivery_tip = weather_adjustments.get('delivery_tips', '')
-            if delivery_tip:
-                st.info(f"💡 **Driver Tip:** {delivery_tip}")
-            
-            time_adj = weather_adjustments.get('time_adjustment', 1.0)
-            if time_adj > 1.0:
-                st.warning(f"⏱️ Expect {int((time_adj - 1) * 100)}% longer delivery times")
+            if hotspot_tips:
+                st.markdown(f"**🚦 {rush_type} Traffic Tips**")
+                st.caption(" | ".join(hotspot_tips))
     
     st.divider()
     
@@ -2465,78 +2558,101 @@ def render_live_orders():
         # Count by status (using helper for consistent comparison)
         # Use active_order_list which excludes delivered orders
         received = [o for o in active_order_list if get_status(o) == OrderStatus.RECEIVED]
-        preparing = [o for o in active_order_list if get_status(o) in [OrderStatus.CONFIRMED, OrderStatus.PREPARING]]
-        ready = [o for o in active_order_list if get_status(o) == OrderStatus.READY]
+        preparing = [o for o in active_order_list if get_status(o) in [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY]]
         delivering = active_deliveries  # Already filtered to exclude delivered
         
-        # Pipeline summary
-        pipeline_cols = st.columns(4)
-        pipeline_cols[0].metric("📥", len(received), "New")
+        # Pipeline summary - compact metrics (3 columns now)
+        pipeline_cols = st.columns(3)
+        pipeline_cols[0].metric("📥", len(received), "Order In")
         pipeline_cols[1].metric("🍕", len(preparing), "Kitchen")
-        pipeline_cols[2].metric("✅", len(ready), "Ready")
-        pipeline_cols[3].metric("🚗", len(delivering), "Out")
+        pipeline_cols[2].metric("🚗", len(delivering), "Out")
         
-        st.divider()
+        # Scrollable container for orders grouped by status
+        # Order In section (Received orders)
+        if received:
+            st.markdown("**📥 Order In**")
+            queue_text = " → ".join([f"`{o.order_id[-3:]}`" for o in sorted(received, key=lambda x: x.order_time)[:10]])
+            if len(received) > 10:
+                queue_text += f" +{len(received)-10} more"
+            st.caption(queue_text)
         
-        # Active orders - compact cards (deduplicated by order_id)
-        all_active = received + preparing + ready + delivering
-        seen_ids = set()
-        active_orders = []
-        for o in all_active:
-            if o.order_id not in seen_ids:
-                seen_ids.add(o.order_id)
-                active_orders.append(o)
+        # Kitchen section (Preparing orders) - compact single line
+        if preparing:
+            st.markdown("**🍕 Kitchen**")
+            kitchen_lines = []
+            for order in sorted(preparing, key=lambda o: o.kitchen_progress or 0, reverse=True)[:8]:
+                progress = order.kitchen_progress or 0
+                remaining_min = max(1, int((100 - progress) / 100 * 10))
+                order_short = order.order_id[-3:]
+                zone = order.delivery_zone or "Downtown"
+                # Modern progress indicator
+                filled = int(progress / 10)
+                bar = "●" * filled + "○" * (10 - filled)
+                kitchen_lines.append(f"`{order_short}` {zone} {bar} {remaining_min}m")
+            st.caption("  \n".join(kitchen_lines))
+            if len(preparing) > 8:
+                st.caption(f"_+{len(preparing)-8} more_")
         
-        if not active_orders:
+        # Out for Delivery section - with driver colors and traffic tips
+        if delivering:
+            st.markdown("**🚗 Out for Delivery**")
+            # Driver color palette (matches map markers)
+            driver_color_emojis = ["🔴", "🟠", "🟡", "🟢", "🔵", "🟣", "🟤", "⚪"]
+            
+            # Get persistent driver color mapping from session state
+            if "driver_color_mapping" not in st.session_state:
+                st.session_state.driver_color_mapping = {}
+            if "next_driver_color_idx" not in st.session_state:
+                st.session_state.next_driver_color_idx = 0
+            
+            # Assign colors to any new drivers
+            for order in delivering:
+                if order.driver_id and order.driver_id not in st.session_state.driver_color_mapping:
+                    st.session_state.driver_color_mapping[order.driver_id] = st.session_state.next_driver_color_idx % len(driver_color_emojis)
+                    st.session_state.next_driver_color_idx += 1
+            
+            delivery_lines = []
+            for order in sorted(delivering, key=lambda o: o.dispatch_time or datetime.now())[:8]:
+                driver = db.get_driver(order.driver_id) if order.driver_id else None
+                driver_name = driver.name.split()[0] if driver else "—"
+                order_short = order.order_id[-3:]
+                zone = order.delivery_zone or "Downtown"
+                
+                # Get persistent color for this driver
+                idx = st.session_state.driver_color_mapping.get(order.driver_id, 0)
+                driver_color = driver_color_emojis[idx]
+                
+                # Calculate ETA and progress
+                if order.dispatch_time:
+                    elapsed = (datetime.now() - order.dispatch_time).total_seconds() / 60
+                    eta = max(1, int((order.estimated_delivery_min or 15) - elapsed))
+                    total_est = order.estimated_delivery_min or 15
+                    progress = min(100, int((elapsed / total_est) * 100))
+                else:
+                    eta = order.estimated_delivery_min or 15
+                    progress = 5
+                
+                # Modern progress indicator
+                filled = int(progress / 10)
+                bar = "●" * filled + "○" * (10 - filled)
+                
+                # Get traffic tip for zone
+                zone_info = DELIVERY_ZONES.get(zone, {})
+                alt_route = zone_info.get("alternate_route", "")
+                risk = zone_info.get("risk_level", "low")
+                
+                line = f"{driver_color} `{order_short}` {driver_name} → {zone} {bar} {eta}m"
+                if risk == "high" and alt_route:
+                    line += f"  \n   _💡 {alt_route}_"
+                delivery_lines.append(line)
+            
+            st.caption("  \n".join(delivery_lines))
+            if len(delivering) > 8:
+                st.caption(f"_+{len(delivering)-8} more_")
+        
+        # Show total if nothing active
+        if not (received or preparing or delivering):
             st.caption("No active orders")
-        else:
-            for order in sorted(active_orders, key=lambda o: o.order_time, reverse=True)[:8]:
-                # Status handling
-                order_status = get_status(order)
-                
-                status_icons = {
-                    OrderStatus.RECEIVED: "🔵",
-                    OrderStatus.CONFIRMED: "🟡",
-                    OrderStatus.PREPARING: "🟠",
-                    OrderStatus.READY: "🟢",
-                    OrderStatus.OUT_FOR_DELIVERY: "🚗",
-                }
-                icon = status_icons.get(order_status, "⚪")
-                
-                # Get order items
-                items_str = ""
-                if order.items:
-                    item_names = [item.item_name for item in order.items[:2]]
-                    items_str = ", ".join(item_names)
-                    if len(order.items) > 2:
-                        items_str += f" +{len(order.items)-2}"
-                
-                # Compact order card
-                with st.container():
-                    c1, c2 = st.columns([3, 2])
-                    with c1:
-                        # Use order's customer_name (randomized) not customer object
-                        name = order.customer_name or "?"
-                        st.markdown(f"{icon} **{order.order_id}** · {name}")
-                        if items_str:
-                            st.caption(f"🍕 {items_str}")
-                        st.caption(f"📍 {order.delivery_zone} · ${order.total_amount:.0f}")
-                    with c2:
-                        # Progress bar
-                        if order_status == OrderStatus.PREPARING:
-                            progress = order.kitchen_progress or 0
-                            st.progress(progress / 100)
-                            st.caption(f"Kitchen {progress}%")
-                        elif order_status == OrderStatus.OUT_FOR_DELIVERY:
-                            progress = order.delivery_progress or 0
-                            st.progress(progress / 100)
-                            driver = db.get_driver(order.driver_id) if order.driver_id else None
-                            driver_name = driver.name.split()[0] if driver else "—"
-                            st.caption(f"🚗 {driver_name} · {progress}%")
-                        elif order_status == OrderStatus.READY:
-                            st.caption("✅ Ready for pickup")
-                        else:
-                            st.caption("Queued")
     
     # =========================================================================
     # ORDER HISTORY (with late delivery info)
@@ -2548,8 +2664,11 @@ def render_live_orders():
     if show_history:
         st.divider()
         
+        # Build order data for table
+        order_table_data = []
+        
         if delivery_facts:
-            # Deduplicate by order_id (in case of duplicates)
+            # Deduplicate by order_id
             seen_orders = set()
             unique_facts = []
             for f in delivery_facts:
@@ -2558,14 +2677,12 @@ def render_live_orders():
                     unique_facts.append(f)
             delivery_facts = unique_facts
             
-            # Use processed facts
             history_count = len(delivery_facts)
             late_count = len([f for f in delivery_facts if not f.is_on_time])
             late_label = f" · {late_count} late" if late_count > 0 else ""
             
             st.markdown(f"#### 📜 Order History ({history_count} completed{late_label})")
             
-            # Summary stats
             on_time_orders = [f for f in delivery_facts if f.is_on_time]
             total_revenue = sum(f.order_amount for f in delivery_facts)
             avg_delivery = sum(f.total_time_min for f in delivery_facts) / len(delivery_facts)
@@ -2577,40 +2694,99 @@ def render_live_orders():
             hist_cols[2].metric("Revenue", f"${total_revenue:.0f}")
             hist_cols[3].metric("Avg Time", f"{avg_delivery:.0f} min")
             
+            # AI Insight for late deliveries
+            late_facts = [f for f in delivery_facts if not f.is_on_time]
+            if late_facts and len(late_facts) >= 2:
+                # Analyze delay patterns
+                delay_reasons = {}
+                zones_affected = set()
+                for f in late_facts:
+                    reason = f.delay_reason or "Unknown"
+                    delay_reasons[reason] = delay_reasons.get(reason, 0) + 1
+                    if f.delivery_zone:
+                        zones_affected.add(f.delivery_zone)
+                top_reason = max(delay_reasons.items(), key=lambda x: x[1])
+                top_reason_text = top_reason[0].lower()
+                
+                # Smart recommendation based on cause category
+                if any(word in top_reason_text for word in ['traffic', 'gridlock', 'accident', 'rush', 'congestion']):
+                    quick_tip = "Consider alternate routes or adjusting dispatch timing."
+                elif any(word in top_reason_text for word in ['kitchen', 'oven', 'prep', 'queue', 'backed up']):
+                    quick_tip = "Review kitchen workflow and consider adding prep staff."
+                elif any(word in top_reason_text for word in ['weather', 'rain', 'snow', 'storm']):
+                    quick_tip = "Extend delivery time estimates during bad weather."
+                elif any(word in top_reason_text for word in ['building', 'elevator', 'security', 'access', 'doorman']):
+                    quick_tip = "Add building access notes to customer profiles."
+                elif any(word in top_reason_text for word in ['driver', 'vehicle', 'breakdown']):
+                    quick_tip = "Check driver availability and vehicle maintenance."
+                else:
+                    quick_tip = "Review delivery routes and kitchen timing."
+                
+                # Check if we need to generate a fresh Cortex insight
+                insight_key = f"{len(late_facts)}_{top_reason[0]}"
+                if "last_insight_key" not in st.session_state or st.session_state.last_insight_key != insight_key:
+                    # Generate fresh insight with Cortex
+                    try:
+                        zones_str = ", ".join(list(zones_affected)[:3]) if zones_affected else "various zones"
+                        prompt = f"""You are analyzing pizza delivery operations. In one sentence, give a specific actionable insight for this situation:
+- {len(late_facts)} late deliveries today
+- Top cause: {top_reason[0]} ({top_reason[1]} times)
+- Zones affected: {zones_str}
+- Current on-time rate: {on_time_pct:.0f}%
+
+Be specific and actionable. Start with a verb."""
+                        
+                        conn = get_snowflake_connection()
+                        cursor = conn.cursor()
+                        cursor.execute(f"SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.1-8b', '{prompt.replace(chr(39), chr(39)+chr(39))}')")
+                        result = cursor.fetchone()
+                        cortex_insight = result[0].strip() if result else quick_tip
+                        cursor.close()
+                        
+                        st.session_state.last_insight_key = insight_key
+                        st.session_state.cached_cortex_insight = cortex_insight
+                    except Exception as e:
+                        st.session_state.cached_cortex_insight = quick_tip
+                
+                # Display the insight
+                cortex_insight = st.session_state.get("cached_cortex_insight", quick_tip)
+                st.info(f"🤖 **AI Insight:** {len(late_facts)} late deliveries — top cause: **{top_reason[0]}**. {cortex_insight}")
+            
             st.divider()
             
-            # Recent orders - each one expandable to show items
-            for fact in sorted(delivery_facts, key=lambda f: f.delivery_date, reverse=True)[:10]:
-                is_late = not fact.is_on_time
-                status_icon = "🔴" if is_late else "✅"
-                time_str = fact.delivery_date.strftime("%H:%M:%S")
-                address = fact.delivery_address if fact.delivery_address else fact.delivery_zone
-                
-                # Get order for items and customer name
+            # Build table data from facts
+            for fact in sorted(delivery_facts, key=lambda f: f.delivery_date, reverse=True)[:15]:
                 order = db.get_order(fact.order_id)
                 customer_name = order.customer_name if order else "Unknown"
-                items_preview = ""
+                
+                items_str = ""
                 if order and order.items:
                     item_names = [item.item_name for item in order.items[:2]]
-                    items_preview = ", ".join(item_names)
+                    items_str = ", ".join(item_names)
                     if len(order.items) > 2:
-                        items_preview += f" +{len(order.items) - 2} more"
+                        items_str += f" +{len(order.items) - 2}"
                 
-                late_info = f" · ⚠️ +{fact.delay_minutes} min" if is_late else ""
-                expander_title = f"{status_icon} **{fact.order_id}** · {customer_name} · {time_str} · 📍 {address} · ${fact.order_amount:.0f}{late_info}"
+                address = fact.delivery_address or (order.delivery_address if order else "") or "—"
+                status = "✅ On-Time" if fact.is_on_time else f"🔴 Late (+{fact.delay_minutes}m)"
+                delay_reason = "" if fact.is_on_time else (fact.delay_reason or "Traffic")
                 
-                with st.expander(expander_title, expanded=False):
-                    st.caption(f"⏱️ Delivery time: {fact.total_time_min} min")
-                    if is_late:
-                        reason = fact.delay_reason or "Unknown"
-                        st.caption(f"⚠️ Delay reason: {reason}")
-                    if order and order.items:
-                        st.markdown("**Items ordered:**")
-                        for item in order.items:
-                            qty_str = f"{item.quantity}x " if item.quantity > 1 else ""
-                            st.caption(f"• {qty_str}{item.item_name} — ${item.total_price:.2f}")
+                # Format date
+                delivery_date_str = fact.delivery_date.strftime("%b %d %H:%M") if fact.delivery_date else "—"
+                
+                order_table_data.append({
+                    "status": status,
+                    "order_id": fact.order_id,
+                    "customer": customer_name,
+                    "items": items_str,
+                    "address": address,
+                    "amount": f"${fact.order_amount:.0f}",
+                    "time": f"{fact.total_time_min} min",
+                    "date": delivery_date_str,
+                    "zone": fact.delivery_zone or "—",
+                    "delay_reason": delay_reason,
+                })
         else:
-            # Fall back to showing delivered orders directly
+            # Use delivered orders directly
             history_count = len(delivered)
             late_count = len([o for o in delivered if o.is_delayed])
             late_label = f" · {late_count} late" if late_count > 0 else ""
@@ -2630,218 +2806,81 @@ def render_live_orders():
             
             st.divider()
             
-            # Show delivered orders - each expandable
-            for order in sorted(delivered, key=lambda o: o.delivery_time or o.order_time, reverse=True)[:10]:
-                is_late = order.is_delayed
-                status_icon = "🔴" if is_late else "✅"
-                time_str = (order.delivery_time or order.order_time).strftime("%H:%M:%S")
-                address = order.delivery_address or order.delivery_zone
+            # Build table data from orders
+            for order in sorted(delivered, key=lambda o: o.delivery_time or o.order_time, reverse=True)[:15]:
+                items_str = ""
+                if order.items:
+                    item_names = [item.item_name for item in order.items[:2]]
+                    items_str = ", ".join(item_names)
+                    if len(order.items) > 2:
+                        items_str += f" +{len(order.items) - 2}"
                 
-                late_info = f" · ⚠️ Delayed" if is_late else ""
-                expander_title = f"{status_icon} **{order.order_id}** · {time_str} · 📍 {address} · ${order.total_amount:.0f}{late_info}"
+                delivery_min = order.actual_delivery_min or 0
+                address = order.delivery_address or "—"
+                status = "✅ On-Time" if not order.is_delayed else "🔴 Late"
+                delay_reason = "" if not order.is_delayed else (order.delay_reason or "Traffic")
                 
-                with st.expander(expander_title, expanded=False):
-                    st.caption(f"⏱️ Delivery time: {order.actual_delivery_min or '?'} min")
-                    if is_late:
-                        reason = order.delay_reason or "Unknown"
-                        st.caption(f"⚠️ Delay reason: {reason}")
-                    if order.items:
-                        st.markdown("**Items ordered:**")
-                        for item in order.items:
-                            qty_str = f"{item.quantity}x " if item.quantity > 1 else ""
-                            st.caption(f"• {qty_str}{item.item_name} — ${item.total_price:.2f}")
-    
-    # Auto-refresh if enabled (at the very end of the function)
-    if auto_refresh:
-        import time as time_module
-        time_module.sleep(3)
-        st.rerun()
-
-
-# =============================================================================
-# DELIVERY TRACKER - REAL-TIME MAP VIEW
-# =============================================================================
-
-def render_delivery_tracker():
-    """Render the live delivery tracking map with weather and traffic info."""
-    st.subheader("🗺️ Live Delivery Tracker")
-    st.caption("Real-time map showing active deliveries, drivers, and conditions")
-    
-    # Check if pipeline is available
-    if not PIPELINE_AVAILABLE:
-        st.error("Pipeline services not available. Please check that all service files exist.")
-        return
-    
-    # Initialize services
-    if not init_pipeline_services():
-        st.error("Failed to initialize pipeline services")
-        return
-    
-    db = st.session_state.pipeline_db
-    
-    # Weather display header
-    weather_col, traffic_col, refresh_col = st.columns([2, 2, 1])
-    
-    with weather_col:
-        try:
-            weather_service = get_weather_service()
-            weather = weather_service.get_current_weather()
+                # Format date
+                delivery_date_str = order.delivery_time.strftime("%b %d %H:%M") if order.delivery_time else (
+                    order.order_time.strftime("%b %d %H:%M") if order.order_time else "—"
+                )
+                
+                order_table_data.append({
+                    "status": status,
+                    "order_id": order.order_id,
+                    "customer": order.customer_name or "Unknown",
+                    "items": items_str,
+                    "address": address,
+                    "amount": f"${order.total_amount:.0f}",
+                    "time": f"{delivery_min} min",
+                    "date": delivery_date_str,
+                    "zone": order.delivery_zone or "—",
+                    "delay_reason": delay_reason,
+                })
+        
+        # Display as table
+        if order_table_data:
+            import pandas as pd
             
-            # Weather card
-            weather_color = "green" if weather.impact_level == "none" else (
-                "orange" if weather.impact_level in ["low", "moderate"] else "red"
-            )
-            st.markdown(f"""
-            **Current Weather** {weather.icon_emoji}  
-            {weather.temperature_f:.0f}°F - {weather.description}  
-            Wind: {weather.wind_speed_mph:.0f} mph | Humidity: {weather.humidity}%
-            """)
+            # Check if there are any late orders
+            has_late_orders = any(row["delay_reason"] for row in order_table_data)
             
-            if weather.alert:
-                st.warning(weather.alert)
-        except Exception as e:
-            st.info("🌤️ Weather: Simulated (API key not configured)")
-            weather = None
-    
-    with traffic_col:
-        # Get current traffic level
-        current_hour = datetime.now().hour
-        try:
-            traffic_condition, traffic_mult = TRAFFIC_BY_HOUR.get(current_hour, ("moderate", 1.2))
-            traffic_icon = "🟢" if traffic_condition == "light" else ("🟡" if traffic_condition == "moderate" else "🔴")
-            st.markdown(f"""
-            **Current Traffic** {traffic_icon}  
-            {traffic_condition.title()} ({traffic_mult:.1f}x delivery time)  
-            Peak hours: 7-9 AM, 12 PM, 4-7 PM
-            """)
-        except:
-            st.info("🚗 Traffic: Normal conditions")
-    
-    with refresh_col:
-        if st.button("🔄 Refresh Map", use_container_width=True):
-            st.rerun()
-        auto_refresh = st.checkbox("Auto-refresh (3s)", value=False)
-    
-    st.divider()
-    
-    # Get active deliveries
-    all_orders = list(db.orders.values())
-    active_deliveries = [o for o in all_orders if o.status == OrderStatus.OUT_FOR_DELIVERY]
-    preparing_orders = [o for o in all_orders if o.status in [OrderStatus.PREPARING, OrderStatus.READY]]
-    
-    # Metrics row
-    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("🚗 Active Deliveries", len(active_deliveries))
-    col_m2.metric("🍕 In Kitchen", len(preparing_orders))
-    
-    # Count available drivers
-    available_drivers = len([d for d in db.drivers.values() if d.status.value == "available"])
-    col_m3.metric("👤 Available Drivers", available_drivers)
-    
-    # Calculate on-time rate for today
-    delivered_today = [o for o in all_orders if o.status == OrderStatus.DELIVERED]
-    if delivered_today:
-        # Simple on-time calculation (could be enhanced)
-        on_time_rate = 85  # Placeholder - would calculate from actual data
-        col_m4.metric("✅ On-Time Rate", f"{on_time_rate}%")
-    else:
-        col_m4.metric("✅ On-Time Rate", "N/A")
-    
-    st.divider()
-    
-    # Build map data
-    map_data = build_delivery_map_data(db, active_deliveries, weather)
-    
-    # Render the map
-    if map_data["has_data"]:
-        render_pydeck_map(map_data)
-    else:
-        st.info("👆 No active deliveries. Start the pipeline and create orders to see them on the map!")
-        
-        # Show empty map centered on store
-        render_empty_map()
-    
-    # Active deliveries list below map
-    if active_deliveries:
-        st.divider()
-        
-        # AI Operations Summary
-        st.markdown("### 🤖 AI Operations Summary")
-        weather_condition = weather.condition if weather else "Clear"
-        
-        # Prepare delivery data for AI summary
-        deliveries_data = []
-        for order in active_deliveries:
-            elapsed = (datetime.now() - order.order_time).total_seconds()
-            eta = max(5, 15 - int(elapsed/60))
-            deliveries_data.append({
-                "order_id": order.order_id,
-                "zone": order.delivery_zone,
-                "eta": eta
-            })
-        
-        with st.spinner("Generating AI insights..."):
-            ai_summary = generate_delivery_summary(deliveries_data, weather_condition)
-        st.info(f"💡 {ai_summary}")
-        
-        st.divider()
-        st.markdown("### 🚗 Active Delivery Details")
-        
-        # Toggle for AI messages
-        use_ai_messages = st.toggle("🤖 Use AI-generated customer messages", value=True)
-        
-        for order in active_deliveries:
-            driver = db.get_driver(order.driver_id) if order.driver_id else None
-            customer = db.get_customer(order.customer_id)
+            # Check if date field exists
+            has_date = any(row.get("date") for row in order_table_data)
             
-            with st.container():
-                col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
-                
-                with col1:
-                    driver_name = driver.name if driver else "Unassigned"
-                    st.markdown(f"**{order.order_id}**")
-                    st.caption(f"🚗 Driver: {driver_name}")
-                
-                with col2:
-                    customer_name = customer.name if customer else "Unknown"
-                    st.markdown(f"📍 {order.delivery_zone}")
-                    st.caption(f"Customer: {customer_name}")
-                
-                with col3:
-                    # Delivery progress (simulated based on time)
-                    elapsed = (datetime.now() - order.order_time).total_seconds()
-                    progress = min(95, int(elapsed / 60 * 10))  # Rough progress
-                    eta_minutes = max(5, 15 - int(elapsed/60))
-                    st.progress(progress / 100)
-                    st.caption(f"ETA: ~{eta_minutes} min")
-                
-                with col4:
-                    # Status indicator based on weather/traffic
-                    if weather and weather.delivery_multiplier > 1.3:
-                        st.markdown("🟡 Delayed")
-                    else:
-                        st.markdown("🟢 On Track")
-                
-                # AI-generated customer message
-                if use_ai_messages:
-                    items = [item.item_name for item in order.items] if order.items else ["Pizza"]
-                    customer_msg = generate_delivery_message(
-                        order_id=order.order_id,
-                        customer_name=customer_name,
-                        driver_name=driver_name.split()[0] if driver_name != "Unassigned" else "Your driver",
-                        eta_minutes=eta_minutes,
-                        items=items,
-                        weather_condition=weather_condition,
-                        use_cortex=True
-                    )
-                    st.success(f"📱 **Customer notification:** {customer_msg}")
-                
-                st.divider()
-    
-    # Auto-refresh
-    if auto_refresh:
-        time.sleep(3)
-        st.rerun()
+            if has_late_orders:
+                df_display = pd.DataFrame([
+                    {
+                        "Status": row["status"],
+                        "Order": row["order_id"],
+                        "Customer": row["customer"],
+                        "Address": row["address"],
+                        "Items": row["items"],
+                        "Amount": row["amount"],
+                        "Delivered": row.get("date", "—"),
+                        "Duration": row["time"],
+                        "Zone": row["zone"],
+                        "Delay Reason": row["delay_reason"],
+                    }
+                    for row in order_table_data
+                ])
+            else:
+                df_display = pd.DataFrame([
+                    {
+                        "Status": row["status"],
+                        "Order": row["order_id"],
+                        "Customer": row["customer"],
+                        "Address": row["address"],
+                        "Items": row["items"],
+                        "Amount": row["amount"],
+                        "Delivered": row.get("date", "—"),
+                        "Duration": row["time"],
+                        "Zone": row["zone"],
+                    }
+                    for row in order_table_data
+                ])
+            
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
 
 
 def build_delivery_map_data(db, active_deliveries, weather=None):
@@ -2854,6 +2893,7 @@ def build_delivery_map_data(db, active_deliveries, weather=None):
     # Store marker
     store_data = [{
         "name": "Chicago Loop Pizza",
+        "reason": "Store Location",
         "lat": store_lat,
         "lon": store_lon,
         "color": MAP_CONFIG.get("colors", {}).get("store", [255, 87, 51, 255]),
@@ -2865,37 +2905,43 @@ def build_delivery_map_data(db, active_deliveries, weather=None):
     customer_data = []
     route_data = []
     
-    # Traffic zones - simulated congestion areas in Chicago Loop
+    # Get active traffic hotspots based on time of day
     current_hour = datetime.now().hour
     traffic_condition, traffic_mult = TRAFFIC_BY_HOUR.get(current_hour, ("moderate", 1.2))
     
-    # Define traffic hotspots (varies by time of day)
+    # Use the centralized traffic hotspot system
+    active_hotspots = get_active_traffic_hotspots()
+    
+    # Convert hotspots to traffic_zones format for map display
     traffic_zones = []
-    if traffic_condition == "heavy":
-        # Rush hour - more congestion zones
-        traffic_zones = [
-            {"name": "I-90/94 Junction", "lat": 41.8756, "lon": -87.6244, "radius": 400, "level": "heavy"},
-            {"name": "Michigan Ave", "lat": 41.8870, "lon": -87.6245, "radius": 350, "level": "heavy"},
-            {"name": "Lake Shore Dr", "lat": 41.8830, "lon": -87.6150, "radius": 300, "level": "moderate"},
-        ]
-    elif traffic_condition == "moderate":
-        traffic_zones = [
-            {"name": "I-90/94 Junction", "lat": 41.8756, "lon": -87.6244, "radius": 300, "level": "moderate"},
-            {"name": "Downtown Core", "lat": 41.8819, "lon": -87.6278, "radius": 200, "level": "light"},
-        ]
-    else:
-        traffic_zones = [
-            {"name": "Downtown Core", "lat": 41.8819, "lon": -87.6278, "radius": 150, "level": "light"},
-        ]
+    for hotspot in active_hotspots:
+        # Determine severity based on hotspot type
+        if hotspot in TRAFFIC_HOTSPOTS["always"]:
+            level = "heavy" if traffic_condition == "heavy" else "moderate"
+        elif hotspot in TRAFFIC_HOTSPOTS.get("rush_hour", []):
+            level = "heavy"
+        elif hotspot in TRAFFIC_HOTSPOTS.get("lunch", []):
+            level = "moderate"
+        else:
+            level = "moderate"
+        
+        traffic_zones.append({
+            "name": hotspot["name"],
+            "lat": hotspot["lat"],
+            "lon": hotspot["lon"],
+            "radius": hotspot["radius"],
+            "level": level,
+            "reason": hotspot.get("reason", "Congestion area"),
+        })
     
     # Add colors to traffic zones
     for zone in traffic_zones:
         if zone["level"] == "heavy":
-            zone["color"] = [244, 67, 54, 80]  # Red with transparency
+            zone["color"] = [244, 67, 54, 100]  # Red with transparency
         elif zone["level"] == "moderate":
-            zone["color"] = [255, 193, 7, 60]  # Yellow with transparency
+            zone["color"] = [255, 193, 7, 80]  # Yellow with transparency
         else:
-            zone["color"] = [76, 175, 80, 40]  # Green with transparency
+            zone["color"] = [76, 175, 80, 50]  # Green with transparency
     
     for order in active_deliveries:
         customer = db.get_customer(order.customer_id)
@@ -2917,7 +2963,7 @@ def build_delivery_map_data(db, active_deliveries, weather=None):
             # Customer destination
             customer_data.append({
                 "name": customer.name if customer else "Customer",
-                "address": order.delivery_address or "Delivery address",
+                "reason": order.delivery_address or "Delivery destination",
                 "lat": dest_lat,
                 "lon": dest_lon,
                 "color": MAP_CONFIG.get("colors", {}).get("customer", [33, 150, 243, 255]),
@@ -2941,48 +2987,68 @@ def build_delivery_map_data(db, active_deliveries, weather=None):
                 driver_lon = store_lon + progress * (dest_lon - store_lon)
             
             if driver:
+                order_short = order.order_id[-3:]
+                # Color palette for drivers (RGB values matching emoji colors)
+                driver_color_palette = [
+                    [255, 59, 48, 255],    # Red 🔴
+                    [255, 149, 0, 255],    # Orange 🟠
+                    [255, 204, 0, 255],    # Yellow 🟡
+                    [52, 199, 89, 255],    # Green 🟢
+                    [0, 122, 255, 255],    # Blue 🔵
+                    [175, 82, 222, 255],   # Purple 🟣
+                    [162, 132, 94, 255],   # Brown 🟤
+                    [255, 255, 255, 255],  # White ⚪
+                ]
+                # Get persistent color from session state mapping
+                driver_color_mapping = st.session_state.get("driver_color_mapping", {})
+                color_idx = driver_color_mapping.get(order.driver_id, 0) % len(driver_color_palette)
+                driver_color = driver_color_palette[color_idx]
+                
                 driver_data.append({
-                    "name": driver.name,
-                    "order_id": order.order_id,
+                    "name": f"#{order_short} - {driver.name}",
+                    "reason": f"Order #{order_short}",
                     "lat": driver_lat,
                     "lon": driver_lon,
-                    "color": MAP_CONFIG.get("colors", {}).get("driver_active", [76, 175, 80, 255]),
-                    "size": 70,
+                    "color": driver_color,
+                    "size": 90,
                     "angle": 0,
+                    "order_label": order_short,
+                    "driver_id": order.driver_id,
                 })
             
-            # Route color based on conditions
-            route_color = MAP_CONFIG.get("colors", {}).get("route_normal", [76, 175, 80, 180])
+            # Route color based on conditions - default to green (normal)
+            route_color = [76, 175, 80, 180]  # Green for normal routes
             
             if weather and weather.delivery_multiplier >= 1.5:
-                route_color = MAP_CONFIG.get("colors", {}).get("route_severe", [244, 67, 54, 180])
+                route_color = [244, 67, 54, 180]  # Red for severe weather
             elif weather and weather.delivery_multiplier >= 1.2:
-                route_color = MAP_CONFIG.get("colors", {}).get("route_delayed", [255, 152, 0, 180])
+                route_color = [255, 152, 0, 180]  # Orange for weather delay
             
-            # Check if route passes through heavy traffic zone
-            route_has_traffic = False
-            for zone in traffic_zones:
-                if zone["level"] == "heavy":
-                    mid_lat = (store_lat + dest_lat) / 2
-                    mid_lon = (store_lon + dest_lon) / 2
-                    dist = ((mid_lat - zone["lat"])**2 + (mid_lon - zone["lon"])**2)**0.5
-                    if dist < 0.01:
-                        route_has_traffic = True
-                        break
-            
-            # Build route path using actual road coordinates or fallback to straight line
+            # Build route path using actual road coordinates
             if order.route_coords and len(order.route_coords) > 1:
                 # Use OSRM route coordinates - format for PathLayer
                 route_path = [[coord[0], coord[1]] for coord in order.route_coords]
             else:
-                # Fallback: straight line
-                route_path = [[store_lon, store_lat], [dest_lon, dest_lat]]
+                # Generate route
+                route_result = get_route_coordinates(store_lon, store_lat, dest_lon, dest_lat)
+                if isinstance(route_result, tuple):
+                    route_path = route_result[0]
+                else:
+                    route_path = route_result
+            
+            # Build route name for tooltip
+            customer_name = customer.name if customer else "Customer"
+            order_short = order.order_id[-3:]
+            route_reason = f"Order #{order_short}"
             
             route_data.append({
                 "path": route_path,
                 "color": route_color,
-                "order_id": order.order_id,
-                "has_traffic": route_has_traffic,
+                "name": f"#{order_short} → {customer_name}",
+                "reason": route_reason,
+                "order_id": order_short,
+                "avoided_zones": [],
+                "alt_route_via": None,
             })
     
     return {
@@ -3019,7 +3085,7 @@ def render_pydeck_map(map_data):
         layers.append(traffic_layer)
     
     # Route paths layer - shows actual road routes
-    if map_data["routes"]:
+    if map_data.get("routes"):
         path_layer = pdk.Layer(
             "PathLayer",
             data=map_data["routes"],
@@ -3032,7 +3098,7 @@ def render_pydeck_map(map_data):
         layers.append(path_layer)
     
     # Store marker layer (large red dot)
-    if map_data["store"]:
+    if map_data.get("store"):
         store_layer = pdk.Layer(
             "ScatterplotLayer",
             data=map_data["store"],
@@ -3044,7 +3110,7 @@ def render_pydeck_map(map_data):
         layers.append(store_layer)
     
     # Customer markers layer (blue dots)
-    if map_data["customers"]:
+    if map_data.get("customers"):
         customer_layer = pdk.Layer(
             "ScatterplotLayer",
             data=map_data["customers"],
@@ -3055,8 +3121,8 @@ def render_pydeck_map(map_data):
         )
         layers.append(customer_layer)
     
-    # Driver markers layer (green dots - moving)
-    if map_data["drivers"]:
+    # Driver markers layer (colored dots - moving)
+    if map_data.get("drivers"):
         driver_layer = pdk.Layer(
             "ScatterplotLayer",
             data=map_data["drivers"],
@@ -3081,20 +3147,20 @@ def render_pydeck_map(map_data):
         initial_view_state=view_state,
         map_style="mapbox://styles/mapbox/dark-v10",
         tooltip={
-            "html": "<b>{name}</b><br/>{address}",
+            "html": "<b>{name}</b><br/>{reason}",
             "style": {"backgroundColor": "steelblue", "color": "white"}
-        }
+        },
+        height=450,
     )
     
-    st.pydeck_chart(deck, use_container_width=True)
+    st.pydeck_chart(deck, use_container_width=True, height=450)
     
     # Compact legend
     st.markdown("""
     <div style="display: flex; flex-wrap: wrap; gap: 15px; font-size: 12px; margin-top: 10px;">
         <span>🔴 Store</span>
-        <span>🟢 Driver</span>
         <span>🔵 Customer</span>
-        <span>━ Route (Green=Normal, Orange=Delayed, Red=Severe)</span>
+        <span>🔴🟠🟡🟢🔵🟣 Drivers (hover for order #)</span>
     </div>
     """, unsafe_allow_html=True)
     
@@ -3112,6 +3178,7 @@ def render_empty_map():
     
     store_data = [{
         "name": "Chicago Loop Pizza",
+        "reason": "Store Location",
         "lat": store_lat,
         "lon": store_lon,
         "color": [255, 87, 51, 255],
@@ -3139,10 +3206,14 @@ def render_empty_map():
         layers=[layer],
         initial_view_state=view_state,
         map_style="mapbox://styles/mapbox/dark-v10",
-        tooltip={"html": "<b>{name}</b>", "style": {"backgroundColor": "steelblue", "color": "white"}}
+        tooltip={
+            "html": "<b>{name}</b><br/>{reason}",
+            "style": {"backgroundColor": "steelblue", "color": "white"}
+        },
+        height=450,
     )
     
-    st.pydeck_chart(deck, use_container_width=True)
+    st.pydeck_chart(deck, use_container_width=True, height=450)
 
 
 # =============================================================================
@@ -3150,9 +3221,39 @@ def render_empty_map():
 # =============================================================================
 
 def main():
-    # Header
-    st.title(":pizza: Pizza Ops Assistant")
-    st.caption("Store Manager's AI Co-Pilot - Powered by Snowflake Cortex")
+    # Header with live status indicator
+    header_col1, header_col2 = st.columns([4, 1])
+    with header_col1:
+        st.title(":pizza: Pizza Ops Assistant")
+        st.caption("Store Manager's AI Co-Pilot — Powered by **Snowflake Cortex**")
+    with header_col2:
+        # Live indicator
+        if "pipeline_running" in st.session_state and st.session_state.pipeline_running:
+            st.markdown("""
+            <div style="text-align: right; padding-top: 20px;">
+                <span style="background: #00D26A; color: white; padding: 4px 12px; border-radius: 12px; font-size: 14px;">
+                    🔴 LIVE
+                </span>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    # Show active demo scenario indicator
+    demo_weather = st.session_state.get("demo_weather")
+    demo_rush = st.session_state.get("demo_rush_hour")
+    if demo_weather or demo_rush:
+        scenario_parts = []
+        if demo_weather:
+            weather_icons = {"Rainy": "🌧️", "Snowy": "❄️"}
+            scenario_parts.append(f"{weather_icons.get(demo_weather, '🌤️')} {demo_weather} Weather")
+        if demo_rush:
+            scenario_parts.append("🚗 Rush Hour Traffic")
+        
+        st.markdown(f"""
+        <div style="background: #FF6B35; padding: 8px 16px; border-radius: 6px; margin: 5px 0;">
+            <span style="color: white; font-weight: 500;">🎬 Demo Scenario Active: {" • ".join(scenario_parts)}</span>
+        </div>
+        """, unsafe_allow_html=True)
+    
     
     # Initialize session state
     if "messages" not in st.session_state:
@@ -3203,29 +3304,20 @@ def main():
         
         st.divider()
         
-        # Info section
-        with st.expander("ℹ️ About this app"):
-            st.markdown("""
-            **Cortex Analyst** analyzes:
-            - Sales & Orders
-            - Delivery Performance
-            - Kitchen Capacity
-            - Staffing Data
-            
-            **Cortex Search** finds:
-            - Customer Reviews
-            - Equipment Reports
-            - Store Audits
-            """)
-            st.caption(f"Model: `{SEMANTIC_MODEL_FILE}`")
+        # Powered by Snowflake section
+        st.markdown("""
+        <div style="text-align: center; padding: 10px; opacity: 0.8;">
+            <small>Powered by</small><br/>
+            <b>❄️ Snowflake Cortex</b><br/>
+            <small style="opacity: 0.6;">Analyst • Search • LLM</small>
+        </div>
+        """, unsafe_allow_html=True)
     
     # Main content area - view selector that syncs with session state
-    view_options = ["📊 Dashboard", "🚀 Live Orders", "💬 Chat Assistant"]
+    view_options = ["🚀 Live Orders", "💬 Chat Assistant"]
     
     # Determine current index based on active view
     if st.session_state.active_view == "Chat":
-        current_index = 2
-    elif st.session_state.active_view == "LiveOrders":
         current_index = 1
     else:
         current_index = 0
@@ -3241,17 +3333,13 @@ def main():
     # Update session state based on selection
     if selected_view == "💬 Chat Assistant":
         st.session_state.active_view = "Chat"
-    elif selected_view == "🚀 Live Orders":
-        st.session_state.active_view = "LiveOrders"
     else:
-        st.session_state.active_view = "Dashboard"
+        st.session_state.active_view = "LiveOrders"
     
     st.divider()
     
     # Render the selected view
-    if st.session_state.active_view == "Dashboard":
-        render_dashboard(st.session_state.selected_store)
-    elif st.session_state.active_view == "LiveOrders":
+    if st.session_state.active_view == "LiveOrders":
         render_live_orders()
     else:
         # Chat view
