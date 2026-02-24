@@ -100,17 +100,20 @@ SELECT
         WHEN MONTH(date_key) = 11 AND DAYOFWEEK(date_key) = 4 AND DAY(date_key) BETWEEN 22 AND 28 THEN 'Thanksgiving'
         ELSE NULL
     END AS holiday_name,
-    -- Game days (Sundays in fall = NFL, plus some random events)
+    -- Game days (NFL Sundays, Bulls/Blackhawks Fridays, special events)
     CASE 
         WHEN DAYOFWEEK(date_key) = 0 AND MONTH(date_key) BETWEEN 9 AND 12 THEN true
         WHEN DAYOFWEEK(date_key) = 0 AND MONTH(date_key) IN (1, 2) THEN true
         WHEN MONTH(date_key) = 2 AND DAY(date_key) BETWEEN 7 AND 14 AND DAYOFWEEK(date_key) = 0 THEN true  -- Super Bowl
+        WHEN DAYOFWEEK(date_key) = 5 AND MONTH(date_key) BETWEEN 10 AND 12 THEN true  -- Bulls/Blackhawks Fridays (Oct-Dec)
+        WHEN DAYOFWEEK(date_key) = 5 AND MONTH(date_key) IN (1, 2, 3) THEN true  -- Bulls/Blackhawks Fridays (Jan-Mar)
         ELSE false
     END AS is_game_day,
     CASE 
         WHEN MONTH(date_key) = 2 AND DAY(date_key) BETWEEN 7 AND 14 AND DAYOFWEEK(date_key) = 0 THEN 'Super Bowl'
         WHEN DAYOFWEEK(date_key) = 0 AND MONTH(date_key) BETWEEN 9 AND 12 THEN 'NFL Sunday'
         WHEN DAYOFWEEK(date_key) = 0 AND MONTH(date_key) IN (1, 2) THEN 'NFL Playoffs'
+        WHEN DAYOFWEEK(date_key) = 5 AND MONTH(date_key) IN (10, 11, 12, 1, 2, 3) THEN 'Bulls/Blackhawks Friday'
         ELSE NULL
     END AS game_event,
     -- Weather patterns (seasonal)

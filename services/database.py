@@ -322,11 +322,10 @@ class PizzaDatabase:
                     self.customers[customer_id].loyalty_tier = state.get("loyalty_tier", "Bronze")
             
             stats = pm.get_stats()
-            if stats.get("total_orders", 0) > 0:
-                print(f"📂 Loaded {stats['total_orders']} orders, {stats['delivery_facts']} deliveries from history")
+            # Silently load persisted data
                 
         except Exception as e:
-            print(f"Warning: Error loading persisted data: {e}")
+            pass  # Silent failure
     
     def _row_to_order(self, row: Dict) -> Optional[Order]:
         """Convert a database row to an Order object"""

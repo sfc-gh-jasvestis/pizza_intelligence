@@ -26,7 +26,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from services.database import get_database, OrderStatus, KitchenStatus, reset_database_singleton
+    from services.database import get_database, OrderStatus, KitchenStatus, reset_database_singleton, Order, OrderItem
     from services.order_simulator import OrderSimulator
     from services.kitchen_service import KitchenService
     from services.driver_dispatch import DriverDispatch
@@ -37,6 +37,16 @@ try:
 except ImportError as e:
     PIPELINE_AVAILABLE = False
     print(f"Pipeline services not available: {e}")
+
+# Import shared state for cross-app sync
+try:
+    from unified_state import (
+        load_state as load_unified_state, get_active_orders, 
+        advance_kitchen, run_simulation_step, STORE_LAT, STORE_LON
+    )
+    UNIFIED_STATE_AVAILABLE = True
+except ImportError:
+    UNIFIED_STATE_AVAILABLE = False
 
 # =============================================================================
 # CONFIGURATION
@@ -861,7 +871,7 @@ Just return the message text, nothing else."""
         
         sql = f"""
             SELECT SNOWFLAKE.CORTEX.COMPLETE(
-                'llama3.1-8b',
+                'claude-3-5-sonnet',
                 '{escaped_prompt}'
             ) as response
         """
@@ -919,7 +929,7 @@ Keep it under 40 words. Be helpful and actionable."""
         
         sql = f"""
             SELECT SNOWFLAKE.CORTEX.COMPLETE(
-                'llama3.1-8b',
+                'claude-3-5-sonnet',
                 '{escaped_prompt}'
             ) as response
         """
@@ -1502,7 +1512,7 @@ def display_grouped_dataframe(df):
     # (uppercase text, repeated values, or contains keywords like RECOMMENDATIONS, PERFORMANCE, etc.)
     section_keywords = ['RECOMMENDATION', 'PERFORMANCE', 'IMPACT', 'ANALYSIS', 'SUMMARY', 
                         'FORECAST', 'WEATHER', 'PROMO', 'METRICS', 'ISSUES', 'TRENDS',
-                        'DEMAND', 'STAFFING']
+                        'DEMAND', 'STAFFING', 'BASELINE', 'COMPARISON']
     
     is_section_column = (
         len(unique_values) >= 2 and 
@@ -1529,6 +1539,8 @@ def display_grouped_dataframe(df):
             'ANALYSIS': '🔍',
             'ISSUES': '⚠️',
             'TRENDS': '📉',
+            'BASELINE': '📏',
+            'COMPARISON': '📏',
         }
         
         # Smart column renaming based on section type
@@ -1541,6 +1553,8 @@ def display_grouped_dataframe(df):
             'FORECAST': ['Metric', 'Value', 'Insight'],
             'DEMAND': ['Metric', 'Value', 'Insight'],
             'STAFFING': ['Role', 'Requirement', 'Action'],
+            'BASELINE': ['Metric', 'Expected', 'Actual'],
+            'COMPARISON': ['Metric', 'Expected', 'Actual'],
         }
         
         for section in unique_values:
@@ -1590,7 +1604,8 @@ def display_sql_results(sql: str) -> str:
         first_col = df.columns[0]
         unique_values = df[first_col].unique()
         section_keywords = ['RECOMMENDATION', 'PERFORMANCE', 'IMPACT', 'ANALYSIS', 'SUMMARY', 
-                            'FORECAST', 'WEATHER', 'PROMO', 'METRICS', 'ISSUES', 'TRENDS']
+                            'FORECAST', 'WEATHER', 'PROMO', 'METRICS', 'ISSUES', 'TRENDS',
+                            'BASELINE', 'COMPARISON']
         
         is_section_data = (
             len(unique_values) >= 2 and 
@@ -2255,6 +2270,144 @@ def check_and_recover_pipelines():
         print("🔄 Auto-recovered dead pipeline threads")
 
 
+def _create_delivery_fact_for_order(db, order, unified_data):
+    """Create a DeliveryFact for a completed order from unified state."""
+    from services.database import DeliveryFact
+    import uuid
+    from datetime import datetime
+    
+    now = datetime.now()
+    
+    # Calculate delivery times from unified data
+    created_ts = unified_data.get("created_at")
+    if created_ts:
+        try:
+            created_time = datetime.fromisoformat(created_ts.replace('Z', '+00:00'))
+            total_time = int((now - created_time.replace(tzinfo=None)).total_seconds() / 60)
+        except:
+            total_time = 30
+    else:
+        total_time = unified_data.get("actual_delivery_min", 30)
+    
+    total_time = max(15, min(60, total_time))
+    prep_time = min(10, total_time // 2)
+    delivery_time = total_time - prep_time
+    promised_time = SIMULATION_CONFIG.get("promised_delivery_min", 30)
+    is_on_time = total_time <= promised_time
+    
+    # Get driver info from config
+    driver_id = order.driver_id or unified_data.get("driver_id", "DRV001")
+    
+    fact = DeliveryFact(
+        delivery_id=f"DEL-{uuid.uuid4().hex[:8].upper()}",
+        order_id=order.order_id,
+        customer_id=order.customer_id,
+        driver_id=driver_id,
+        delivery_date=now,
+        delivery_hour=now.hour,
+        day_of_week=now.strftime("%A"),
+        is_weekend=now.weekday() >= 5,
+        is_peak_hour=now.hour in [12, 13, 17, 18, 19, 20],
+        order_amount=order.total_amount,
+        item_count=order.item_count,
+        prep_time_min=prep_time,
+        delivery_time_min=delivery_time,
+        total_time_min=total_time,
+        promised_time_min=promised_time,
+        is_on_time=is_on_time,
+        delay_minutes=max(0, total_time - promised_time) if not is_on_time else 0,
+        delay_reason=unified_data.get("delay_reason", "") if not is_on_time else "",
+        weather_condition=unified_data.get("weather", "Clear"),
+        traffic_condition=unified_data.get("traffic", "moderate"),
+        delivery_zone=order.delivery_zone or unified_data.get("zone", "Loop Core"),
+        delivery_address=order.delivery_address or "",
+        route_distance_km=unified_data.get("route_distance_km", 3.5),
+    )
+    
+    db.record_delivery(fact)
+
+
+def sync_unified_state_orders():
+    """Sync orders from unified state JSON to ops database and run simulation step."""
+    if not UNIFIED_STATE_AVAILABLE or not PIPELINE_AVAILABLE:
+        return
+    
+    # Run one simulation step to advance all orders
+    run_simulation_step()
+    
+    try:
+        db = get_database()
+        unified_state = load_unified_state()
+        unified_orders = unified_state.get("orders", {})
+        
+        # Status mapping from unified state to OrderStatus
+        status_map = {
+            "pending": OrderStatus.RECEIVED,
+            "preparing": OrderStatus.PREPARING,
+            "ready": OrderStatus.READY,
+            "picked_up": OrderStatus.OUT_FOR_DELIVERY,
+            "on_the_way": OrderStatus.OUT_FOR_DELIVERY,
+            "delivered": OrderStatus.DELIVERED,
+        }
+        
+        for order_id, order_data in unified_orders.items():
+            # Check if order already exists
+            existing = db.get_order(order_id)
+            
+            if existing:
+                # Update status if changed
+                new_status = status_map.get(order_data.get("status"), OrderStatus.RECEIVED)
+                if existing.status != new_status:
+                    # If transitioning to delivered, create DeliveryFact
+                    if new_status == OrderStatus.DELIVERED and existing.status != OrderStatus.DELIVERED:
+                        _create_delivery_fact_for_order(db, existing, order_data)
+                    db.update_order(order_id, status=new_status)
+                # Update kitchen progress
+                if order_data.get("kitchen_progress"):
+                    db.update_order(order_id, kitchen_progress=order_data["kitchen_progress"])
+                # Update driver info
+                if order_data.get("driver_id"):
+                    db.update_order(order_id, driver_id=order_data["driver_id"])
+                # Update delivery progress
+                if order_data.get("delivery_progress"):
+                    db.update_order(order_id, delivery_progress=order_data["delivery_progress"])
+                # Update route coordinates from unified state
+                if order_data.get("route_coords"):
+                    db.update_order(order_id, route_coords=order_data["route_coords"])
+            else:
+                # Create new order
+                items = []
+                for i, item_str in enumerate(order_data.get("items", [])):
+                    items.append(OrderItem(
+                        order_item_id=f"{order_id}-{i}",
+                        order_id=order_id,
+                        item_id=f"ITEM-{i}",
+                        item_name=item_str,
+                        quantity=1,
+                        unit_price=order_data.get("total", 25.0) / max(1, len(order_data.get("items", []))),
+                        total_price=order_data.get("total", 25.0) / max(1, len(order_data.get("items", [])))
+                    ))
+                
+                new_order = Order(
+                    order_id=order_id,
+                    customer_id=f"CUST-{hash(order_data.get('customer_name', 'Guest')) % 10000}",
+                    customer_name=order_data.get("customer_name", "Guest"),
+                    driver_id=order_data.get("driver_id"),
+                    items=items,
+                    total_amount=order_data.get("total", 25.0),
+                    item_count=len(items),
+                    status=status_map.get(order_data.get("status"), OrderStatus.RECEIVED),
+                    delivery_address=order_data.get("address", ""),
+                    delivery_lat=order_data.get("lat", 41.88),
+                    delivery_lon=order_data.get("lon", -87.63),
+                    delivery_zone=order_data.get("zone", "Loop"),
+                    route_coords=order_data.get("route_coords"),
+                )
+                db.create_order(new_order)
+    except Exception as e:
+        print(f"Error syncing unified state: {e}")
+
+
 def render_live_orders():
     """Render clean single-page operations dashboard."""
     
@@ -2270,6 +2423,9 @@ def render_live_orders():
     
     # Auto-recover dead pipeline threads (handles idle timeout issues)
     check_and_recover_pipelines()
+    
+    # Sync orders from unified state (Customer/Driver apps) and run simulation step
+    sync_unified_state_orders()
     
     # Get fresh database reference (not from session state cache)
     db = get_database()
@@ -2738,7 +2894,7 @@ Be specific and actionable. Start with a verb."""
                         
                         conn = get_snowflake_connection()
                         cursor = conn.cursor()
-                        cursor.execute(f"SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.1-8b', '{prompt.replace(chr(39), chr(39)+chr(39))}')")
+                        cursor.execute(f"SELECT SNOWFLAKE.CORTEX.COMPLETE('claude-3-5-sonnet', '{prompt.replace(chr(39), chr(39)+chr(39))}')")
                         result = cursor.fetchone()
                         cortex_insight = result[0].strip() if result else quick_tip
                         cursor.close()
@@ -2988,21 +3144,18 @@ def build_delivery_map_data(db, active_deliveries, weather=None):
             
             if driver:
                 order_short = order.order_id[-3:]
-                # Color palette for drivers (RGB values matching emoji colors)
-                driver_color_palette = [
-                    [255, 59, 48, 255],    # Red 🔴
-                    [255, 149, 0, 255],    # Orange 🟠
-                    [255, 204, 0, 255],    # Yellow 🟡
-                    [52, 199, 89, 255],    # Green 🟢
-                    [0, 122, 255, 255],    # Blue 🔵
-                    [175, 82, 222, 255],   # Purple 🟣
-                    [162, 132, 94, 255],   # Brown 🟤
-                    [255, 255, 255, 255],  # White ⚪
+                driver_color_rgba = [
+                    [255, 59, 48, 255],
+                    [255, 149, 0, 255],
+                    [255, 204, 0, 255],
+                    [52, 199, 89, 255],
+                    [0, 122, 255, 255],
+                    [175, 82, 222, 255],
+                    [162, 132, 94, 255],
+                    [255, 255, 255, 255],
                 ]
-                # Get persistent color from session state mapping
-                driver_color_mapping = st.session_state.get("driver_color_mapping", {})
-                color_idx = driver_color_mapping.get(order.driver_id, 0) % len(driver_color_palette)
-                driver_color = driver_color_palette[color_idx]
+                color_idx = st.session_state.get("driver_color_mapping", {}).get(order.driver_id, 3)
+                driver_color = driver_color_rgba[color_idx % len(driver_color_rgba)]
                 
                 driver_data.append({
                     "name": f"#{order_short} - {driver.name}",
@@ -3017,12 +3170,23 @@ def build_delivery_map_data(db, active_deliveries, weather=None):
                 })
             
             # Route color based on conditions - default to green (normal)
-            route_color = [76, 175, 80, 180]  # Green for normal routes
+            route_rgba = [
+                [255, 59, 48, 180],
+                [255, 149, 0, 180],
+                [255, 204, 0, 180],
+                [52, 199, 89, 180],
+                [0, 122, 255, 180],
+                [175, 82, 222, 180],
+                [162, 132, 94, 180],
+                [255, 255, 255, 180],
+            ]
+            r_idx = st.session_state.get("driver_color_mapping", {}).get(order.driver_id, 3)
+            route_color = route_rgba[r_idx % len(route_rgba)]
             
             if weather and weather.delivery_multiplier >= 1.5:
-                route_color = [244, 67, 54, 180]  # Red for severe weather
+                route_color = [244, 67, 54, 200]
             elif weather and weather.delivery_multiplier >= 1.2:
-                route_color = [255, 152, 0, 180]  # Orange for weather delay
+                route_color = [255, 152, 0, 200]
             
             # Build route path using actual road coordinates
             if order.route_coords and len(order.route_coords) > 1:
@@ -3158,9 +3322,11 @@ def render_pydeck_map(map_data):
     # Compact legend
     st.markdown("""
     <div style="display: flex; flex-wrap: wrap; gap: 15px; font-size: 12px; margin-top: 10px;">
-        <span>🔴 Store</span>
-        <span>🔵 Customer</span>
-        <span>🔴🟠🟡🟢🔵🟣 Drivers (hover for order #)</span>
+        <span>🟠 Store</span>
+        <span>🔵 Customers</span>
+        <span>🟢 Drivers</span>
+        <span>🟢 Route (normal)</span>
+        <span style="color: #f44336;">● Traffic Zone</span>
     </div>
     """, unsafe_allow_html=True)
     
@@ -3171,7 +3337,7 @@ def render_pydeck_map(map_data):
 
 
 def render_empty_map():
-    """Render an empty map centered on the store."""
+    """Render an empty map centered on the store with traffic zones."""
     
     store_lat = STORE_CONFIG.get("lat", 41.8819)
     store_lon = STORE_CONFIG.get("lon", -87.6278)
@@ -3185,14 +3351,46 @@ def render_empty_map():
         "size": 100,
     }]
     
-    layer = pdk.Layer(
+    # Get active traffic hotspots
+    active_hotspots = get_active_traffic_hotspots()
+    traffic_zones = []
+    for hotspot in active_hotspots:
+        if hotspot in TRAFFIC_HOTSPOTS["always"]:
+            color = [244, 67, 54, 100]  # Red
+        else:
+            color = [255, 193, 7, 80]   # Yellow
+        traffic_zones.append({
+            "name": hotspot["name"],
+            "lat": hotspot["lat"],
+            "lon": hotspot["lon"],
+            "radius": hotspot["radius"],
+            "color": color,
+            "reason": hotspot.get("reason", "Traffic zone"),
+        })
+    
+    layers = []
+    
+    # Traffic zones layer (render first)
+    if traffic_zones:
+        layers.append(pdk.Layer(
+            "ScatterplotLayer",
+            data=traffic_zones,
+            get_position=["lon", "lat"],
+            get_color="color",
+            get_radius="radius",
+            pickable=True,
+            opacity=0.3,
+        ))
+    
+    # Store marker
+    layers.append(pdk.Layer(
         "ScatterplotLayer",
         data=store_data,
         get_position=["lon", "lat"],
         get_color="color",
         get_radius="size",
         pickable=True,
-    )
+    ))
     
     view_state = pdk.ViewState(
         latitude=store_lat,
@@ -3203,7 +3401,7 @@ def render_empty_map():
     )
     
     deck = pdk.Deck(
-        layers=[layer],
+        layers=layers,
         initial_view_state=view_state,
         map_style="mapbox://styles/mapbox/dark-v10",
         tooltip={
@@ -3214,6 +3412,439 @@ def render_empty_map():
     )
     
     st.pydeck_chart(deck, use_container_width=True, height=450)
+
+
+# =============================================================================
+# INTELLIGENCE DASHBOARD
+# =============================================================================
+
+def _cortex_complete(prompt: str) -> str:
+    """Call Cortex COMPLETE and return the response text."""
+    conn = get_snowflake_connection()
+    escaped = prompt.replace("'", "''").replace("\\", "\\\\")
+    sql = f"SELECT SNOWFLAKE.CORTEX.COMPLETE('claude-3-5-sonnet', '{escaped}') as response"
+    result = conn.session().sql(sql).collect()
+    if result and len(result) > 0:
+        return result[0]['RESPONSE'].replace("$", "\\$")
+    return ""
+
+
+def _get_ops_snapshot() -> dict:
+    """Build a data snapshot of current operations for Cortex prompts."""
+    db = get_database()
+    all_orders = db.get_all_orders()
+    facts = list(db.delivery_facts.values())
+
+    active = [o for o in all_orders if o.status not in (OrderStatus.DELIVERED, OrderStatus.CANCELLED)]
+    delivered = [o for o in all_orders if o.status == OrderStatus.DELIVERED]
+    preparing = [o for o in all_orders if o.status in (OrderStatus.PREPARING, OrderStatus.RECEIVED)]
+    in_transit = [o for o in all_orders if o.status == OrderStatus.OUT_FOR_DELIVERY]
+
+    on_time = [f for f in facts if f.is_on_time]
+    late = [f for f in facts if not f.is_on_time]
+    avg_time = sum(f.total_time_min for f in facts) / len(facts) if facts else 0
+    total_revenue = sum(f.order_amount for f in facts)
+    avg_order = total_revenue / len(facts) if facts else 0
+
+    zone_perf = {}
+    for f in facts:
+        z = f.delivery_zone or "Unknown"
+        zone_perf.setdefault(z, {"count": 0, "late": 0, "total_time": 0, "revenue": 0})
+        zone_perf[z]["count"] += 1
+        zone_perf[z]["total_time"] += f.total_time_min
+        zone_perf[z]["revenue"] += f.order_amount
+        if not f.is_on_time:
+            zone_perf[z]["late"] += 1
+
+    driver_perf = {}
+    for f in facts:
+        d = f.driver_id or "Unknown"
+        driver_perf.setdefault(d, {"count": 0, "late": 0, "total_time": 0})
+        driver_perf[d]["count"] += 1
+        driver_perf[d]["total_time"] += f.total_time_min
+        if not f.is_on_time:
+            driver_perf[d]["late"] += 1
+
+    hour = datetime.now().hour
+    day = datetime.now().strftime("%A")
+
+    return {
+        "current_hour": hour,
+        "day_of_week": day,
+        "active_orders": len(active),
+        "preparing": len(preparing),
+        "in_transit": len(in_transit),
+        "completed_today": len(delivered),
+        "total_facts": len(facts),
+        "on_time_count": len(on_time),
+        "late_count": len(late),
+        "on_time_pct": round(len(on_time) / len(facts) * 100, 1) if facts else 0,
+        "avg_delivery_min": round(avg_time, 1),
+        "total_revenue": round(total_revenue, 2),
+        "avg_order_value": round(avg_order, 2),
+        "zone_performance": zone_perf,
+        "driver_performance": driver_perf,
+        "late_reasons": [f.delay_reason for f in late if f.delay_reason],
+    }
+
+
+def render_intelligence_dashboard():
+    """Render the AI Intelligence dashboard with all four Cortex features."""
+
+    if not PIPELINE_AVAILABLE:
+        st.info("Start the pipeline from Live Orders first to generate data for intelligence features.")
+        return
+
+    if not init_pipeline_services():
+        st.info("Initialize services from Live Orders view first.")
+        return
+
+    sync_unified_state_orders()
+
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px 25px; border-radius: 16px; margin-bottom: 20px;">
+        <div style="display:flex; align-items:center; gap:15px;">
+            <span style="font-size:40px;">🧠</span>
+            <div>
+                <div style="font-size:22px; font-weight:bold; color:white;">Snowflake Intelligence Dashboard</div>
+                <div style="color:rgba(255,255,255,0.8); font-size:14px;">Cortex AI · Demand Forecasting · Anomaly Detection · Natural Language Analytics</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    tab_summary, tab_forecast, tab_alerts, tab_analyst = st.tabs([
+        "📋 Shift Brief", "📈 Demand Forecast", "🚨 Smart Alerts", "🔍 Ask Your Data"
+    ])
+
+    # ── Tab 1: Live Cortex Summary ──────────────────────────────────────────
+    with tab_summary:
+        _render_shift_brief()
+
+    # ── Tab 2: AI Demand Forecast ───────────────────────────────────────────
+    with tab_forecast:
+        _render_demand_forecast()
+
+    # ── Tab 3: Smart Notifications ──────────────────────────────────────────
+    with tab_alerts:
+        _render_smart_alerts()
+
+    # ── Tab 4: Cortex Analyst ───────────────────────────────────────────────
+    with tab_analyst:
+        _render_cortex_analyst()
+
+
+# ─── TAB 1: Shift Brief ────────────────────────────────────────────────────
+
+def _render_shift_brief():
+    """One-click AI-generated shift intelligence brief."""
+    st.markdown("### 📋 AI Shift Intelligence Brief")
+    st.caption("Cortex generates a real-time operations summary with recommended actions")
+
+    if st.button("🧠 Generate Shift Brief", type="primary", use_container_width=True, key="gen_brief"):
+        st.session_state.intel_brief_pending = True
+
+    if st.session_state.get("intel_brief_pending"):
+        with st.spinner("Cortex is analyzing your operations..."):
+            snap = _get_ops_snapshot()
+            zone_lines = "\n".join(
+                f"  - {z}: {d['count']} deliveries, {d['late']} late, avg {round(d['total_time']/d['count'],1)}min"
+                for z, d in snap["zone_performance"].items()
+            ) or "  No zone data yet"
+            driver_lines = "\n".join(
+                f"  - {d_id}: {d['count']} deliveries, {d['late']} late, avg {round(d['total_time']/d['count'],1)}min"
+                for d_id, d in snap["driver_performance"].items()
+            ) or "  No driver data yet"
+            late_reasons = ", ".join(snap["late_reasons"][:10]) or "None"
+
+            prompt = f"""You are an AI operations analyst for Chicago Loop Pizza.
+Generate a concise shift intelligence brief for the store manager. Today is {snap['day_of_week']}, current hour: {snap['current_hour']}:00.
+
+CURRENT STATE:
+- Active orders: {snap['active_orders']} (preparing: {snap['preparing']}, in transit: {snap['in_transit']})
+- Completed deliveries: {snap['total_facts']}
+- On-time rate: {snap['on_time_pct']}% ({snap['on_time_count']} on-time, {snap['late_count']} late)
+- Average delivery time: {snap['avg_delivery_min']} minutes
+- Total revenue: ${snap['total_revenue']:.2f} (avg order: ${snap['avg_order_value']:.2f})
+
+ZONE PERFORMANCE:
+{zone_lines}
+
+DRIVER PERFORMANCE:
+{driver_lines}
+
+LATE DELIVERY REASONS: {late_reasons}
+
+Format your response EXACTLY as:
+## 🟢 Shift Status: [Good/Warning/Critical]
+[One sentence overall assessment]
+
+### 📊 Key Metrics
+| Metric | Value | Status |
+|--------|-------|--------|
+[3-5 rows with real numbers from above]
+
+### ⚠️ Issues Requiring Attention
+[Bullet list of 2-3 specific issues OR "No issues detected"]
+
+### ✅ Recommended Actions
+| Priority | Action | Expected Impact |
+|----------|--------|-----------------|
+[3 specific actions based on the data]
+
+### 📈 Shift Outlook
+[2 sentences: forecast for rest of shift and one proactive recommendation]"""
+
+            try:
+                response = _cortex_complete(prompt)
+                st.session_state.intel_brief_result = response
+                st.session_state.intel_brief_pending = False
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error generating brief: {e}")
+                st.session_state.intel_brief_pending = False
+
+    if st.session_state.get("intel_brief_result"):
+        st.markdown(st.session_state.intel_brief_result)
+        st.caption(f"_Generated at {datetime.now().strftime('%I:%M %p')} by Snowflake Cortex (claude-3-5-sonnet)_")
+
+
+# ─── TAB 2: Demand Forecast ────────────────────────────────────────────────
+
+def _render_demand_forecast():
+    """AI-powered demand prediction with staffing recommendations."""
+    st.markdown("### 📈 AI Demand Forecast")
+    st.caption("Cortex predicts order volume for the next 3 hours with staffing recommendations")
+
+    if st.button("🔮 Generate Forecast", type="primary", use_container_width=True, key="gen_forecast"):
+        st.session_state.intel_forecast_pending = True
+
+    if st.session_state.get("intel_forecast_pending"):
+        with st.spinner("Cortex is analyzing demand patterns..."):
+            snap = _get_ops_snapshot()
+
+            hourly_data = {}
+            facts = list(get_database().delivery_facts.values())
+            for f in facts:
+                h = f.delivery_hour
+                hourly_data.setdefault(h, 0)
+                hourly_data[h] += 1
+            hourly_str = ", ".join(f"{h}:00={c}" for h, c in sorted(hourly_data.items())) or "No historical data"
+
+            prompt = f"""You are an AI demand forecasting engine for Chicago Loop Pizza.
+Today is {snap['day_of_week']}, current time: {snap['current_hour']}:00.
+
+HISTORICAL ORDER VOLUME BY HOUR TODAY: {hourly_str}
+CURRENT STATE: {snap['active_orders']} active orders, {snap['total_facts']} completed today
+AVERAGE ORDER VALUE: ${snap['avg_order_value']:.2f}
+
+Based on typical pizza restaurant patterns (lunch rush 11-14, dinner rush 17-21, slow 14-17):
+
+Provide your forecast EXACTLY as:
+
+### 🕐 Next 3 Hours Forecast
+
+| Hour | Predicted Orders | Confidence | Revenue Estimate |
+|------|-----------------|------------|-----------------|
+| {snap['current_hour']+1}:00 | [number] | [High/Medium/Low] | $[amount] |
+| {snap['current_hour']+2}:00 | [number] | [High/Medium/Low] | $[amount] |
+| {snap['current_hour']+3}:00 | [number] | [High/Medium/Low] | $[amount] |
+
+### 👥 Staffing Recommendation
+
+| Role | Current | Recommended | Action |
+|------|---------|-------------|--------|
+| Drivers | [infer from data] | [number] | [Add/Remove/Keep] |
+| Kitchen Staff | [infer] | [number] | [Add/Remove/Keep] |
+
+### 🎯 Prep-Ahead Advisory
+[3 bullet points: what ingredients to prep, dough batches to make, driver positioning]
+
+### 💡 Revenue Opportunity
+[One specific actionable recommendation to maximize revenue in the next 3 hours, referencing real data]"""
+
+            try:
+                response = _cortex_complete(prompt)
+                st.session_state.intel_forecast_result = response
+                st.session_state.intel_forecast_pending = False
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error generating forecast: {e}")
+                st.session_state.intel_forecast_pending = False
+
+    if st.session_state.get("intel_forecast_result"):
+        st.markdown(st.session_state.intel_forecast_result)
+        st.caption(f"_Generated at {datetime.now().strftime('%I:%M %p')} by Snowflake Cortex (claude-3-5-sonnet)_")
+
+
+# ─── TAB 3: Smart Alerts ───────────────────────────────────────────────────
+
+def _render_smart_alerts():
+    """Real-time anomaly detection with AI-powered alerts."""
+    st.markdown("### 🚨 Smart Anomaly Detection")
+    st.caption("Cortex monitors your operations and flags issues in real-time")
+
+    if st.button("🔍 Run Anomaly Scan", type="primary", use_container_width=True, key="gen_alerts"):
+        st.session_state.intel_alerts_pending = True
+
+    if st.session_state.get("intel_alerts_pending"):
+        with st.spinner("Cortex is scanning for anomalies..."):
+            snap = _get_ops_snapshot()
+
+            zone_str = "\n".join(
+                f"  {z}: {d['count']} orders, {d['late']} late ({round(d['late']/d['count']*100,1) if d['count'] else 0}%), avg {round(d['total_time']/d['count'],1) if d['count'] else 0}min"
+                for z, d in snap["zone_performance"].items()
+            ) or "  No data"
+            driver_str = "\n".join(
+                f"  {d_id}: {d['count']} orders, {d['late']} late, avg {round(d['total_time']/d['count'],1) if d['count'] else 0}min"
+                for d_id, d in snap["driver_performance"].items()
+            ) or "  No data"
+            late_reasons = ", ".join(snap["late_reasons"][:15]) or "None"
+
+            prompt = f"""You are an AI anomaly detection system for Chicago Loop Pizza.
+Analyze the following operational data and identify any anomalies, risks, or patterns that need attention.
+
+CURRENT STATE ({snap['day_of_week']}, {snap['current_hour']}:00):
+- Active: {snap['active_orders']} | Completed: {snap['total_facts']} | On-time: {snap['on_time_pct']}%
+- Avg delivery: {snap['avg_delivery_min']}min | Revenue: ${snap['total_revenue']:.2f}
+
+ZONE BREAKDOWN:
+{zone_str}
+
+DRIVER BREAKDOWN:
+{driver_str}
+
+RECENT LATE REASONS: {late_reasons}
+
+Analyze for these anomaly types:
+1. Delivery time spikes (any zone >25min avg)
+2. On-time rate drops (any zone <70%)
+3. Driver performance outliers
+4. Revenue anomalies
+5. Unusual demand patterns
+
+Format your response EXACTLY as:
+
+### 🔴 Critical Alerts
+[List critical issues or "None detected"]
+
+### 🟡 Warnings
+[List warning-level issues or "None detected"]
+
+### 🟢 Positive Trends
+[List 2-3 things going well]
+
+### 🎯 Automated Recommendations
+| Alert | Root Cause | Recommended Action | Impact |
+|-------|-----------|-------------------|--------|
+[One row per alert/warning detected, max 5]
+
+### 📊 Anomaly Score: [1-10]/10
+[One sentence: overall operations health assessment]"""
+
+            try:
+                response = _cortex_complete(prompt)
+                st.session_state.intel_alerts_result = response
+                st.session_state.intel_alerts_pending = False
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error running anomaly scan: {e}")
+                st.session_state.intel_alerts_pending = False
+
+    if st.session_state.get("intel_alerts_result"):
+        st.markdown(st.session_state.intel_alerts_result)
+        st.caption(f"_Scanned at {datetime.now().strftime('%I:%M %p')} by Snowflake Cortex (claude-3-5-sonnet)_")
+
+
+# ─── TAB 4: Cortex Analyst ─────────────────────────────────────────────────
+
+def _render_cortex_analyst():
+    """Natural language query interface over delivery data via Cortex Analyst."""
+    st.markdown("### 🔍 Ask Your Data")
+    st.caption("Ask questions in plain English — Cortex Analyst generates SQL and returns results")
+
+    quick_questions = [
+        "Average delivery time by zone",
+        "Revenue by day of week",
+        "Drivers with most late deliveries",
+        "Top delay reasons",
+        "Total orders and revenue last 7 days",
+    ]
+
+    selected_q = st.pills("Try a question", quick_questions, key="analyst_pills")
+    if selected_q:
+        st.session_state.intel_analyst_question = selected_q
+
+    user_q = st.text_input("Or type your own:", placeholder="e.g., What percentage of deliveries are late on weekends?", key="analyst_input")
+    if user_q:
+        st.session_state.intel_analyst_question = user_q
+
+    if st.session_state.get("intel_analyst_question"):
+        question = st.session_state.intel_analyst_question
+        st.session_state.intel_analyst_question = None
+
+        with st.spinner(f"Cortex Analyst is processing: *{question}*"):
+            try:
+                messages = [{"role": "user", "content": [{"type": "text", "text": question}]}]
+                response = send_analyst_message(messages)
+
+                if response and response.get("message"):
+                    msg_content = response["message"].get("content", [])
+                    sql_text = None
+                    text_response = None
+
+                    for block in msg_content:
+                        if block.get("type") == "sql":
+                            sql_text = block.get("statement", "")
+                        elif block.get("type") == "text":
+                            text_response = block.get("text", "")
+
+                    if text_response:
+                        st.markdown(text_response)
+
+                    if sql_text:
+                        with st.expander("📝 Generated SQL", expanded=False):
+                            st.code(sql_text, language="sql")
+
+                        try:
+                            conn = get_snowflake_connection()
+                            df = conn.session().sql(sql_text).to_pandas()
+
+                            st.markdown("#### 📊 Results")
+                            st.dataframe(df, use_container_width=True, hide_index=True)
+
+                            numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+                            skip_cols = ['id', 'year', 'month', 'day', 'hour']
+                            chart_cols = [c for c in numeric_cols if not any(s in c.lower() for s in skip_cols)]
+
+                            if chart_cols and len(df) > 1 and len(df) <= 50:
+                                non_numeric = [c for c in df.columns if c not in numeric_cols]
+                                if non_numeric:
+                                    st.markdown("#### 📈 Chart")
+                                    st.bar_chart(df.set_index(non_numeric[0])[chart_cols[:3]])
+
+                            with st.spinner("Generating insights..."):
+                                data_str = df.to_string(index=False)
+                                insight = _cortex_complete(f"""Based on this data for Chicago Loop Pizza, provide 3 bullet point insights:
+Question: {question}
+Data:
+{data_str[:2000]}
+
+Format: 3 short bullet points with actionable insights. Use real numbers from the data.""")
+                                if insight:
+                                    st.markdown("#### 💡 AI Insights")
+                                    st.markdown(insight)
+
+                        except Exception as e:
+                            st.warning(f"Could not execute SQL: {e}")
+                    elif not text_response:
+                        st.info("Cortex Analyst could not generate a response for this question. Try rephrasing.")
+                else:
+                    st.warning("No response from Cortex Analyst.")
+            except Exception as e:
+                st.error(f"Error querying Cortex Analyst: {e}")
+
+        st.caption(f"_Powered by Snowflake Cortex Analyst + claude-3-5-sonnet_")
 
 
 # =============================================================================
@@ -3279,24 +3910,6 @@ def main():
         
         st.divider()
         
-        # Demo Questions section
-        st.subheader("🎯 Sample Questions")
-        st.caption("Click any question to ask the AI assistant")
-        
-        for i, q in enumerate(DEMO_QUESTIONS):
-            # Create colored button label
-            btn_label = f":{q['color']}[:material/{q['icon']}:] {q['label']}"
-            if st.button(btn_label, key=f"demo_q_{i}", use_container_width=True):
-                # Prepend store context to question
-                store_question = f"For {st.session_state.selected_store}: {q['question']}"
-                st.session_state.pending_question = store_question
-                st.session_state.pending_type = q.get("type")
-                st.session_state.active_view = "Chat"  # Switch to chat view
-                st.rerun()
-        
-        st.divider()
-        
-        # Clear chat button
         if st.button("🗑️ Clear Chat", use_container_width=True):
             st.session_state.messages = []
             st.session_state.processing = False
@@ -3308,16 +3921,18 @@ def main():
         st.markdown("""
         <div style="text-align: center; padding: 10px; opacity: 0.8;">
             <small>Powered by</small><br/>
-            <b>❄️ Snowflake Cortex</b><br/>
-            <small style="opacity: 0.6;">Analyst • Search • LLM</small>
+            <b>❄️ Snowflake Intelligence</b><br/>
+            <small style="opacity: 0.6;">Cortex Analyst • Search • LLM • Forecasting</small>
         </div>
         """, unsafe_allow_html=True)
     
     # Main content area - view selector that syncs with session state
-    view_options = ["🚀 Live Orders", "💬 Chat Assistant"]
+    view_options = ["🚀 Live Orders", "🧠 Intelligence", "💬 Chat Assistant"]
     
     # Determine current index based on active view
     if st.session_state.active_view == "Chat":
+        current_index = 2
+    elif st.session_state.active_view == "Intelligence":
         current_index = 1
     else:
         current_index = 0
@@ -3333,6 +3948,8 @@ def main():
     # Update session state based on selection
     if selected_view == "💬 Chat Assistant":
         st.session_state.active_view = "Chat"
+    elif selected_view == "🧠 Intelligence":
+        st.session_state.active_view = "Intelligence"
     else:
         st.session_state.active_view = "LiveOrders"
     
@@ -3341,6 +3958,8 @@ def main():
     # Render the selected view
     if st.session_state.active_view == "LiveOrders":
         render_live_orders()
+    elif st.session_state.active_view == "Intelligence":
+        render_intelligence_dashboard()
     else:
         # Chat view
         # Process pending question from sidebar
@@ -3365,9 +3984,17 @@ def main():
             - 🍕 **Kitchen Capacity** - Equipment status, production capacity
             - 💰 **Revenue Impact** - How issues are affecting your bottom line
             - 💬 **Customer Feedback** - What are customers saying about your store?
-            
-            **👈 Click a demo question in the sidebar** or type your own question below!
             """)
+            
+            demo_labels = [q["label"] for q in DEMO_QUESTIONS]
+            picked = st.pills("Try a question", demo_labels, key="chat_demo_pills")
+            if picked:
+                match = next((q for q in DEMO_QUESTIONS if q["label"] == picked), None)
+                if match:
+                    store_question = f"For {st.session_state.selected_store}: {match['question']}"
+                    st.session_state.pending_question = store_question
+                    st.session_state.pending_type = match.get("type")
+                    st.rerun()
         
         # Display chat history
         for idx, message in enumerate(st.session_state.messages):

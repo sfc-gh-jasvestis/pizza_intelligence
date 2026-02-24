@@ -1427,7 +1427,11 @@ verified_queries:
           'DEMAND FORECAST' as section,
           '📊 Expected Orders' as col1,
           gda.avg_orders || ' orders' as col2,
-          ROUND((gda.avg_orders - rfa.avg_orders) * 100.0 / rfa.avg_orders, 0) || '% above regular Friday' as col3,
+          CASE 
+            WHEN gda.avg_orders > rfa.avg_orders * 1.2 THEN '🔥 +' || ROUND((gda.avg_orders - rfa.avg_orders) * 100.0 / rfa.avg_orders, 0) || '% vs regular Friday - HIGH VOLUME expected!'
+            WHEN gda.avg_orders > rfa.avg_orders THEN '📈 +' || ROUND((gda.avg_orders - rfa.avg_orders) * 100.0 / rfa.avg_orders, 0) || '% above regular Friday'
+            ELSE '📉 Similar to regular Friday (' || rfa.avg_orders || ' orders typical)'
+          END as col3,
           1 as sort_key
         FROM game_day_avg gda, regular_friday_avg rfa
         UNION ALL
@@ -1435,7 +1439,11 @@ verified_queries:
           'DEMAND FORECAST',
           '💰 Expected Revenue',
           '$' || gda.avg_revenue,
-          'Plan for high-volume night',
+          CASE 
+            WHEN gda.avg_revenue > 5000 THEN '💵 High revenue night - ensure adequate change/supplies'
+            WHEN gda.avg_revenue > 3000 THEN '💵 Above average revenue expected'
+            ELSE '💵 Standard revenue expected'
+          END,
           2
         FROM game_day_avg gda
         UNION ALL
@@ -1443,7 +1451,11 @@ verified_queries:
           'DEMAND FORECAST',
           '🛒 Avg Order Size',
           '$' || gda.avg_order_size,
-          'Expect larger group orders',
+          CASE 
+            WHEN gda.avg_order_size > 70 THEN '🍕 Large group orders likely - prep XL pizzas'
+            WHEN gda.avg_order_size > 50 THEN '🍕 Medium-large orders expected'
+            ELSE '🍕 Standard order sizes expected'
+          END,
           3
         FROM game_day_avg gda
       ),
@@ -1476,7 +1488,7 @@ verified_queries:
           'Prep 30% more than usual Friday',
           4
       )
-      SELECT section, col1, col2, col3
+      SELECT section, col1 as "Metric", col2 as "Value", col3 as "Insight"
       FROM (
         SELECT section, col1, col2, col3, 1 as section_order, sort_key FROM demand_forecast
         UNION ALL
@@ -2284,7 +2296,7 @@ verified_queries:
           'Hearty comfort food drives sales in cold weather',
           3.0
       )
-      SELECT section, col1, col2, col3
+      SELECT section, col1 as "Item", col2 as "Details", col3 as "Recommendation"
       FROM (
         SELECT section, col1, col2, col3, 1 as section_order, sort_key FROM promo_recommendations
         UNION ALL

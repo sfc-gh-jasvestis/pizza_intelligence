@@ -8,12 +8,25 @@ import pydeck as pdk
 import time
 from datetime import datetime
 import random
+import requests
 
-from shared_state import (
-    load_state, save_state, create_order, get_order, 
-    rate_order, get_all_active_orders, assign_driver
+try:
+    from streamlit_autorefresh import st_autorefresh
+    AUTOREFRESH_AVAILABLE = True
+except ImportError:
+    AUTOREFRESH_AVAILABLE = False
+
+from unified_state import (
+    load_state, create_order, get_order, rate_order, 
+    get_all_drivers, run_simulation_step, STORE_LAT, STORE_LON
 )
-from menu_data import MENU_ITEMS, DELIVERY_ZONES, STORE_NAME, STORE_LAT, STORE_LON, DRIVERS
+from menu_data import MENU_ITEMS, DELIVERY_ZONES, STORE_NAME, DRIVERS
+
+try:
+    from shared_routes import get_route_from_osrm, get_driver_position_on_route
+    ROUTES_AVAILABLE = True
+except ImportError:
+    ROUTES_AVAILABLE = False
 
 st.set_page_config(
     page_title="Chicago Loop Pizza",
@@ -22,124 +35,367 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# Auto-refresh every 3 seconds to pick up state changes
+if AUTOREFRESH_AVAILABLE:
+    st_autorefresh(interval=3000, limit=None, key="customer_autorefresh")
+
+# Run simulation step on each refresh to advance orders
+run_simulation_step()
+
 st.markdown("""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap');
+    
     .stApp {
-        background: linear-gradient(180deg, #1a1a2e 0%, #0f0f1a 100%);
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f1a 100%);
+        font-family: 'Poppins', sans-serif;
     }
-    .hero-header {
-        background: linear-gradient(135deg, #FF6B35 0%, #F7931E 50%, #FF6B35 100%);
-        padding: 20px;
-        border-radius: 16px;
-        text-align: center;
-        margin-bottom: 20px;
+    
+    /* Header Banner */
+    .header-banner {
+        background: linear-gradient(135deg, #FF6B35 0%, #ff8c42 50%, #FF6B35 100%);
+        padding: 25px 40px;
+        border-radius: 20px;
+        margin-bottom: 25px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 10px 40px rgba(255, 107, 53, 0.3);
+    }
+    
+    .logo-section {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+    }
+    
+    .logo-icon {
+        font-size: 50px;
+        filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.3));
+    }
+    
+    .logo-text h1 {
+        margin: 0;
+        font-size: 32px;
+        font-weight: 800;
         color: white;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
     }
+    
+    .logo-text p {
+        margin: 0;
+        font-size: 14px;
+        color: rgba(255,255,255,0.9);
+    }
+    
+    .promo-badge {
+        background: rgba(255,255,255,0.2);
+        padding: 12px 25px;
+        border-radius: 30px;
+        color: white;
+        font-weight: 600;
+        font-size: 14px;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255,255,255,0.3);
+    }
+    
+    /* Category Pills */
+    .category-container {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 25px;
+        flex-wrap: wrap;
+    }
+    
+    /* Menu Grid */
+    .menu-section {
+        margin-bottom: 30px;
+    }
+    
+    .section-title {
+        color: #FF6B35;
+        font-size: 24px;
+        font-weight: 700;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    .menu-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 20px;
+    }
+    
+    /* Menu Card - Digital Board Style */
     .menu-card {
-        background: #ffffff;
+        background: linear-gradient(145deg, #2a2a40 0%, #1f1f35 100%);
         border-radius: 16px;
-        padding: 0;
-        margin-bottom: 15px;
         overflow: hidden;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        transition: all 0.3s ease;
+        border: 1px solid rgba(255,107,53,0.1);
+        box-shadow: 0 8px 30px rgba(0,0,0,0.3);
     }
+    
+    .menu-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 40px rgba(255,107,53,0.2);
+        border-color: rgba(255,107,53,0.3);
+    }
+    
+    .menu-card-image {
+        width: 100%;
+        height: 180px;
+        object-fit: cover;
+        border-bottom: 3px solid #FF6B35;
+    }
+    
     .menu-card-content {
-        padding: 15px;
+        padding: 18px;
     }
-    .price-tag {
-        background: linear-gradient(135deg, #FF6B35, #F7931E);
+    
+    .menu-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 10px;
+    }
+    
+    .menu-card-name {
+        font-size: 18px;
+        font-weight: 700;
+        color: white;
+        margin: 0;
+    }
+    
+    .menu-card-price {
+        background: linear-gradient(135deg, #FF6B35 0%, #ff8c42 100%);
         color: white;
         padding: 8px 16px;
         border-radius: 20px;
-        font-weight: bold;
-        font-size: 18px;
+        font-weight: 700;
+        font-size: 16px;
+        box-shadow: 0 4px 15px rgba(255,107,53,0.4);
     }
+    
+    .menu-card-desc {
+        color: #a0a0b0;
+        font-size: 13px;
+        margin: 0;
+        line-height: 1.5;
+    }
+    
+    /* Cart Sidebar */
+    .cart-panel {
+        background: linear-gradient(180deg, #252538 0%, #1a1a28 100%);
+        border-radius: 20px;
+        padding: 25px;
+        border: 1px solid rgba(255,107,53,0.2);
+        box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+        position: sticky;
+        top: 20px;
+    }
+    
+    .cart-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 15px;
+        border-bottom: 2px solid rgba(255,107,53,0.2);
+    }
+    
+    .cart-title {
+        color: white;
+        font-size: 20px;
+        font-weight: 700;
+        margin: 0;
+    }
+    
+    .cart-count {
+        background: #FF6B35;
+        color: white;
+        padding: 5px 12px;
+        border-radius: 15px;
+        font-weight: 600;
+        font-size: 14px;
+    }
+    
     .cart-item {
-        background: #2d2d44;
+        background: rgba(255,255,255,0.05);
         padding: 12px 15px;
-        border-radius: 10px;
-        margin: 8px 0;
+        border-radius: 12px;
+        margin-bottom: 10px;
         display: flex;
         justify-content: space-between;
         align-items: center;
     }
-    .order-status {
-        text-align: center;
-        padding: 30px;
-        border-radius: 16px;
-        margin: 15px 0;
-    }
-    .status-preparing {
-        background: linear-gradient(135deg, #FFC107 0%, #FF9800 100%);
-    }
-    .status-on-way {
-        background: linear-gradient(135deg, #17A2B8 0%, #138496 100%);
-    }
-    .status-delivered {
-        background: linear-gradient(135deg, #28A745 0%, #1E7E34 100%);
-    }
-    .eta-display {
-        font-size: 48px;
-        font-weight: bold;
+    
+    .cart-item-name {
         color: white;
+        font-weight: 500;
+        font-size: 14px;
     }
-    .tracking-card {
-        background: #ffffff;
-        border-radius: 16px;
-        padding: 20px;
-        margin: 15px 0;
+    
+    .cart-item-qty {
+        color: #FF6B35;
+        font-weight: 600;
     }
-    .step-indicator {
+    
+    .cart-item-price {
+        color: #a0a0b0;
+        font-size: 14px;
+    }
+    
+    .cart-total-section {
+        background: rgba(255,107,53,0.1);
+        padding: 15px;
+        border-radius: 12px;
+        margin-top: 15px;
+    }
+    
+    .cart-total-row {
         display: flex;
         justify-content: space-between;
-        margin: 20px 0;
+        color: #a0a0b0;
+        font-size: 14px;
+        margin-bottom: 8px;
     }
-    .step {
-        text-align: center;
-        flex: 1;
-    }
-    .step-icon {
-        font-size: 24px;
-        margin-bottom: 5px;
-    }
-    .step-active {
-        color: #FF6B35;
-        font-weight: bold;
-    }
-    .step-done {
-        color: #28A745;
-    }
-    .step-pending {
-        color: #aaa;
-    }
-    .category-tab {
-        background: #2d2d44;
-        padding: 12px 20px;
-        border-radius: 25px;
-        margin: 5px;
-        cursor: pointer;
+    
+    .cart-total-final {
+        display: flex;
+        justify-content: space-between;
         color: white;
-        border: none;
+        font-size: 20px;
+        font-weight: 700;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(255,255,255,0.1);
     }
-    .category-tab-active {
-        background: linear-gradient(135deg, #FF6B35, #F7931E);
-    }
-    .quantity-btn {
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        border: none;
+    
+    /* Order Button */
+    .order-btn {
+        background: linear-gradient(135deg, #FF6B35 0%, #ff8c42 100%);
+        color: white;
+        padding: 18px;
+        border-radius: 15px;
         font-size: 18px;
-        font-weight: bold;
-    }
-    .rating-star {
-        font-size: 40px;
+        font-weight: 700;
+        text-align: center;
+        margin-top: 20px;
         cursor: pointer;
-        transition: transform 0.2s;
+        transition: all 0.3s ease;
+        box-shadow: 0 8px 25px rgba(255,107,53,0.4);
     }
-    .rating-star:hover {
-        transform: scale(1.2);
+    
+    .order-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 35px rgba(255,107,53,0.5);
     }
+    
+    /* Featured Banner */
+    .featured-banner {
+        background: linear-gradient(135deg, #FF6B35 0%, #e85a2b 100%);
+        border-radius: 16px;
+        padding: 20px 30px;
+        margin-bottom: 25px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        box-shadow: 0 8px 30px rgba(255,107,53,0.3);
+    }
+    
+    .featured-text h3 {
+        color: white;
+        margin: 0;
+        font-size: 22px;
+        font-weight: 700;
+    }
+    
+    .featured-text p {
+        color: rgba(255,255,255,0.9);
+        margin: 5px 0 0 0;
+        font-size: 14px;
+    }
+    
+    .featured-code {
+        background: white;
+        color: #FF6B35;
+        padding: 12px 25px;
+        border-radius: 10px;
+        font-weight: 700;
+        font-size: 16px;
+    }
+    
+    /* Quick Info Bar */
+    .info-bar {
+        display: flex;
+        gap: 30px;
+        margin-bottom: 25px;
+        padding: 15px 25px;
+        background: rgba(255,255,255,0.05);
+        border-radius: 12px;
+    }
+    
+    .info-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: white;
+    }
+    
+    .info-icon {
+        font-size: 20px;
+    }
+    
+    .info-text {
+        font-size: 14px;
+    }
+    
+    .info-text span {
+        color: #FF6B35;
+        font-weight: 600;
+    }
+    
+    /* Tracking */
+    .tracking-card {
+        background: linear-gradient(145deg, #2a2a40 0%, #1f1f35 100%);
+        border-radius: 20px;
+        padding: 30px;
+        border: 1px solid rgba(255,107,53,0.2);
+    }
+    
+    .status-badge {
+        display: inline-block;
+        padding: 8px 20px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 14px;
+    }
+    
+    .status-preparing { background: #FFC107; color: #000; }
+    .status-ready { background: #17A2B8; color: white; }
+    .status-onway { background: #007BFF; color: white; }
+    .status-delivered { background: #28A745; color: white; }
+    
+    /* Empty Cart */
+    .empty-cart {
+        text-align: center;
+        padding: 40px 20px;
+        color: #a0a0b0;
+    }
+    
+    .empty-cart-icon {
+        font-size: 50px;
+        margin-bottom: 15px;
+        opacity: 0.5;
+    }
+    
+    /* Hide Streamlit elements */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stDeployButton {display: none;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -153,13 +409,13 @@ if "view" not in st.session_state:
 if "active_order_id" not in st.session_state:
     st.session_state.active_order_id = None
 if "customer_name" not in st.session_state:
-    st.session_state.customer_name = "Demo Customer"
+    st.session_state.customer_name = "Alex Johnson"
 if "customer_phone" not in st.session_state:
     st.session_state.customer_phone = "555-1234"
 if "selected_address" not in st.session_state:
     st.session_state.selected_address = 0
-if "category" not in st.session_state:
-    st.session_state.category = "Pizzas"
+if "selected_tip" not in st.session_state:
+    st.session_state.selected_tip = 3
 
 
 def add_to_cart(item_name, price):
@@ -185,167 +441,191 @@ def get_cart_count():
     return sum(item["qty"] for item in st.session_state.cart.values())
 
 
-def render_menu():
+@st.cache_data(ttl=300)
+def get_cached_route(start_lon, start_lat, end_lon, end_lat):
+    """Get actual road route - cached version."""
+    if ROUTES_AVAILABLE:
+        coords, _, _ = get_route_from_osrm(start_lon, start_lat, end_lon, end_lat)
+        return coords
+    return [[start_lon, start_lat], [end_lon, end_lat]]
+
+
+TRAFFIC_HOTSPOTS = {
+    "always": [
+        {"name": "I-90/94 Junction", "lat": 41.8756, "lon": -87.6244, "radius": 350, "reason": "Highway interchange"},
+        {"name": "Michigan & Wacker", "lat": 41.8870, "lon": -87.6245, "radius": 250, "reason": "Tourist congestion"},
+    ],
+    "rush_hour": [
+        {"name": "Lake Shore Dr & Ohio", "lat": 41.8920, "lon": -87.6130, "radius": 300, "reason": "Commuter backup"},
+        {"name": "Congress Pkwy", "lat": 41.8754, "lon": -87.6290, "radius": 280, "reason": "Highway merge"},
+        {"name": "Chicago & State", "lat": 41.8967, "lon": -87.6280, "radius": 200, "reason": "Transit hub"},
+        {"name": "Clark & Division", "lat": 41.9040, "lon": -87.6315, "radius": 220, "reason": "Nightlife district"},
+    ],
+    "lunch": [
+        {"name": "Randolph & Michigan", "lat": 41.8846, "lon": -87.6246, "radius": 200, "reason": "Millennium Park lunch rush"},
+        {"name": "Adams & Wacker", "lat": 41.8792, "lon": -87.6370, "radius": 180, "reason": "Willis Tower lunch crowd"},
+        {"name": "Hubbard & Clark", "lat": 41.8898, "lon": -87.6310, "radius": 180, "reason": "River North restaurants"},
+    ],
+    "weekend": [
+        {"name": "Navy Pier area", "lat": 41.8917, "lon": -87.6059, "radius": 400, "reason": "Tourist attraction"},
+        {"name": "Magnificent Mile", "lat": 41.8950, "lon": -87.6245, "radius": 300, "reason": "Shopping traffic"},
+    ],
+}
+
+
+def get_traffic_zones_for_map():
+    """Get active traffic zones with colors for map display."""
+    now = datetime.now()
+    hour = now.hour
+    weekday = now.weekday()
+    
+    active = list(TRAFFIC_HOTSPOTS["always"])
+    
+    if 7 <= hour <= 9 or 16 <= hour <= 19:
+        active.extend(TRAFFIC_HOTSPOTS["rush_hour"])
+    
+    if 11 <= hour <= 14:
+        active.extend(TRAFFIC_HOTSPOTS["lunch"])
+    
+    if weekday >= 5:  # Saturday or Sunday
+        active.extend(TRAFFIC_HOTSPOTS["weekend"])
+    
+    traffic_zones = []
+    for hotspot in active:
+        if hotspot in TRAFFIC_HOTSPOTS["always"]:
+            color = [244, 67, 54, 100]  # Red
+        else:
+            color = [255, 193, 7, 80]   # Yellow
+        
+        traffic_zones.append({
+            "name": hotspot["name"],
+            "lat": hotspot["lat"],
+            "lon": hotspot["lon"],
+            "radius": hotspot["radius"],
+            "color": color,
+            "reason": hotspot["reason"],
+        })
+    
+    return traffic_zones
+
+
+def render_header():
     st.markdown(f"""
-    <div class="hero-header">
-        <h1 style="margin: 0; font-size: 28px;">🍕 {STORE_NAME}</h1>
-        <p style="margin: 5px 0 0 0; opacity: 0.9;">Fresh from our oven to your door</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    categories = list(MENU.keys())
-    
-    for i, cat in enumerate(categories):
-        with [col1, col2, col3, col4][i]:
-            if st.button(
-                f"{cat}", 
-                key=f"cat_{cat}",
-                use_container_width=True,
-                type="primary" if st.session_state.category == cat else "secondary"
-            ):
-                st.session_state.category = cat
-                st.rerun()
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    items = MENU[st.session_state.category]
-    cols = st.columns(2)
-    
-    for idx, item in enumerate(items):
-        with cols[idx % 2]:
-            with st.container():
-                image_url = item.get('image', '')
-                st.markdown(f"""
-                <div class="menu-card">
-                    <div style="width: 100%; height: 140px; overflow: hidden;">
-                        <img src="{image_url}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'">
-                    </div>
-                    <div class="menu-card-content">
-                        <div style="display: flex; justify-content: space-between; align-items: start;">
-                            <strong style="font-size: 16px;">{item['name']}</strong>
-                            <span class="price-tag">${item['price']:.2f}</span>
-                        </div>
-                        <p style="color: #666; margin: 8px 0; font-size: 13px;">{item['desc']}</p>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                cart_qty = st.session_state.cart.get(item['name'], {}).get('qty', 0)
-                
-                c1, c2, c3 = st.columns([1, 2, 1])
-                with c1:
-                    if cart_qty > 0:
-                        if st.button("➖", key=f"rem_{item['name']}", use_container_width=True):
-                            remove_from_cart(item['name'])
-                            st.rerun()
-                with c2:
-                    if cart_qty > 0:
-                        st.markdown(f"<div style='text-align: center; padding: 8px; color: white; font-weight: bold;'>{cart_qty} in cart</div>", unsafe_allow_html=True)
-                with c3:
-                    if st.button("➕", key=f"add_{item['name']}", use_container_width=True, type="primary"):
-                        add_to_cart(item['name'], item['price'])
-                        st.rerun()
-    
-    st.markdown("<br>" * 3, unsafe_allow_html=True)
-    
-    cart_count = get_cart_count()
-    if cart_count > 0:
-        cart_total = get_cart_total()
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            st.markdown(f"""
-            <div style="background: #2d2d44; padding: 15px; border-radius: 12px;">
-                <span style="color: white; font-size: 16px;">🛒 {cart_count} items</span>
-                <span style="color: #FF6B35; font-size: 20px; font-weight: bold; float: right;">${cart_total:.2f}</span>
+    <div class="header-banner">
+        <div class="logo-section">
+            <div class="logo-icon">🍕</div>
+            <div class="logo-text">
+                <h1>{STORE_NAME}</h1>
+                <p>Fresh • Hot • Delivered Fast</p>
             </div>
-            """, unsafe_allow_html=True)
-        with col2:
-            if st.button("View Cart →", use_container_width=True, type="primary"):
-                st.session_state.view = "cart"
-                st.rerun()
-
-
-def render_cart():
-    st.markdown("""
-    <div style="display: flex; align-items: center; margin-bottom: 20px;">
-        <h2 style="color: white; margin: 0;">🛒 Your Cart</h2>
+        </div>
+        <div class="promo-badge">🔥 FREE DELIVERY on orders $25+</div>
     </div>
     """, unsafe_allow_html=True)
+
+
+def render_info_bar():
+    st.markdown("""
+    <div class="info-bar">
+        <div class="info-item">
+            <span class="info-icon">🕐</span>
+            <span class="info-text">Delivery: <span>25-35 min</span></span>
+        </div>
+        <div class="info-item">
+            <span class="info-icon">📍</span>
+            <span class="info-text">Chicago Loop Area</span>
+        </div>
+        <div class="info-item">
+            <span class="info-icon">⭐</span>
+            <span class="info-text">Rating: <span>4.8</span> (2.3k reviews)</span>
+        </div>
+        <div class="info-item">
+            <span class="info-icon">🚗</span>
+            <span class="info-text">Min Order: <span>$12</span></span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_featured():
+    st.markdown("""
+    <div class="featured-banner">
+        <div class="featured-text">
+            <h3>🎉 Weekend Special!</h3>
+            <p>Get 20% off on all Supreme Pizzas this weekend only</p>
+        </div>
+        <div class="featured-code">SUPREME20</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_cart_panel():
+    cart_count = get_cart_count()
     
-    if st.button("← Back to Menu"):
-        st.session_state.view = "menu"
-        st.rerun()
+    st.markdown(f"""
+    <div class="cart-header">
+        <h3 class="cart-title">🛒 Your Order</h3>
+        <span class="cart-count">{cart_count} items</span>
+    </div>
+    """, unsafe_allow_html=True)
     
     if not st.session_state.cart:
         st.markdown("""
-        <div style="text-align: center; padding: 60px; color: #aaa;">
-            <div style="font-size: 64px;">🛒</div>
-            <h3>Your cart is empty</h3>
-            <p>Add some delicious items from our menu!</p>
+        <div class="empty-cart">
+            <div class="empty-cart-icon">🛒</div>
+            <p>Your cart is empty</p>
+            <p style="font-size: 12px;">Add items from the menu</p>
         </div>
         """, unsafe_allow_html=True)
         return
     
-    st.markdown("### Items")
     for item_name, item_data in st.session_state.cart.items():
-        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-        with col1:
-            st.markdown(f"<span style='color: white; font-size: 16px;'>{item_name}</span>", unsafe_allow_html=True)
-        with col2:
-            st.markdown(f"<span style='color: #aaa;'>${item_data['price']:.2f}</span>", unsafe_allow_html=True)
-        with col3:
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                if st.button("−", key=f"cart_rem_{item_name}"):
-                    remove_from_cart(item_name)
-                    st.rerun()
-            with c2:
-                st.markdown(f"<div style='text-align: center; color: white;'>{item_data['qty']}</div>", unsafe_allow_html=True)
-            with c3:
-                if st.button("+", key=f"cart_add_{item_name}"):
-                    add_to_cart(item_name, item_data['price'])
-                    st.rerun()
-        with col4:
-            subtotal = item_data['price'] * item_data['qty']
-            st.markdown(f"<span style='color: #FF6B35; font-weight: bold;'>${subtotal:.2f}</span>", unsafe_allow_html=True)
-        st.divider()
-    
-    st.markdown("### Delivery Address")
-    address_options = [f"{addr['label']} - {addr['address']}" for addr in DELIVERY_ADDRESSES]
-    selected = st.selectbox("Select address", address_options, index=st.session_state.selected_address, label_visibility="collapsed")
-    st.session_state.selected_address = address_options.index(selected)
-    
-    st.markdown("### Special Instructions")
-    instructions = st.text_input("Any special requests?", placeholder="e.g., Ring doorbell, extra napkins...", label_visibility="collapsed")
-    
-    st.markdown("---")
+        subtotal = item_data['price'] * item_data['qty']
+        st.markdown(f"**{item_name}**")
+        st.caption(f"${item_data['price']:.2f} × {item_data['qty']} = ${subtotal:.2f}")
+        if st.button(f"➖ Remove one", key=f"cr_{item_name}", use_container_width=True):
+            remove_from_cart(item_name)
+            st.rerun()
+        if st.button(f"➕ Add one", key=f"ca_{item_name}", use_container_width=True):
+            add_to_cart(item_name, item_data['price'])
+            st.rerun()
+        st.markdown("---")
     
     subtotal = get_cart_total()
-    delivery_fee = 3.99
+    delivery_fee = 0 if subtotal >= 25 else 3.99
     tax = subtotal * 0.1025
     total = subtotal + delivery_fee + tax
     
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("<span style='color: #aaa;'>Subtotal</span>", unsafe_allow_html=True)
-        st.markdown("<span style='color: #aaa;'>Delivery Fee</span>", unsafe_allow_html=True)
-        st.markdown("<span style='color: #aaa;'>Tax</span>", unsafe_allow_html=True)
-        st.markdown("<span style='color: white; font-weight: bold; font-size: 20px;'>Total</span>", unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"<span style='color: white; text-align: right; display: block;'>${subtotal:.2f}</span>", unsafe_allow_html=True)
-        st.markdown(f"<span style='color: white; text-align: right; display: block;'>${delivery_fee:.2f}</span>", unsafe_allow_html=True)
-        st.markdown(f"<span style='color: white; text-align: right; display: block;'>${tax:.2f}</span>", unsafe_allow_html=True)
-        st.markdown(f"<span style='color: #FF6B35; font-weight: bold; font-size: 20px; text-align: right; display: block;'>${total:.2f}</span>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="font-size:13px;color:#aaa;">
+        Subtotal: ${subtotal:.2f}<br>
+        Delivery: {'FREE' if delivery_fee == 0 else f'${delivery_fee:.2f}'}<br>
+        Tax: ${tax:.2f}
+    </div>
+    <div style="font-size:18px;font-weight:bold;color:white;margin-top:10px;">
+        Total: ${total:.2f}
+    </div>
+    """, unsafe_allow_html=True)
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    if st.button("🍕 Place Order", use_container_width=True, type="primary"):
-        addr = DELIVERY_ADDRESSES[st.session_state.selected_address]
+    st.markdown("##### 👤 Your Name")
+    st.session_state.customer_name = st.text_input("Name", value=st.session_state.customer_name, label_visibility="collapsed")
+    
+    st.markdown("##### 📍 Deliver To")
+    address_labels = [addr['label'] for addr in DELIVERY_ADDRESSES]
+    selected_label = st.selectbox("Address", address_labels, index=st.session_state.selected_address, label_visibility="collapsed")
+    st.session_state.selected_address = address_labels.index(selected_label)
+    addr = DELIVERY_ADDRESSES[st.session_state.selected_address]
+    st.caption(addr['address'])
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    if st.button("🍕 Place Order", use_container_width=True, type="primary", disabled=cart_count == 0):
         order_id = f"ORD-{random.randint(10000, 99999)}"
-        
         items_list = [f"{data['qty']}x {name}" for name, data in st.session_state.cart.items()]
         
+        # Create order in unified state - driver assigned automatically at 80% kitchen progress
         create_order(
             order_id=order_id,
             customer_name=st.session_state.customer_name,
@@ -356,19 +636,85 @@ def render_cart():
             lat=addr["lat"],
             lon=addr["lon"],
             total=round(total, 2),
-            special_instructions=instructions
+            special_instructions=""
         )
-        
-        driver_id = random.choice(list(DRIVERS.keys()))
-        assign_driver(order_id, driver_id)
         
         st.session_state.active_order_id = order_id
         st.session_state.cart = {}
         st.session_state.view = "tracking"
+        st.balloons()
         st.rerun()
 
 
-def render_tracking():
+def render_menu_item(item, category):
+    image_url = item.get('image', '')
+    cart_qty = st.session_state.cart.get(item['name'], {}).get('qty', 0)
+    
+    st.markdown(f"""
+    <div class="menu-card">
+        <img src="{image_url}" class="menu-card-image" onerror="this.src='https://via.placeholder.com/300x180/2a2a40/FF6B35?text=🍕'">
+        <div class="menu-card-content">
+            <div class="menu-card-header">
+                <h4 class="menu-card-name">{item['name']}</h4>
+                <span class="menu-card-price">${item['price']:.2f}</span>
+            </div>
+            <p class="menu-card-desc">{item['desc']}</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if cart_qty > 0:
+        st.markdown(f"<div style='text-align:center;color:#FF6B35;font-weight:bold;padding:5px;'>{cart_qty} in cart</div>", unsafe_allow_html=True)
+        if st.button(f"➖ Remove", key=f"rem_{category}_{item['name']}", use_container_width=True):
+            remove_from_cart(item['name'])
+            st.rerun()
+        if st.button(f"➕ Add More", key=f"add_{category}_{item['name']}", use_container_width=True, type="primary"):
+            add_to_cart(item['name'], item['price'])
+            st.rerun()
+    else:
+        if st.button("Add to Cart", key=f"add_{category}_{item['name']}", use_container_width=True, type="primary"):
+            add_to_cart(item['name'], item['price'])
+            st.rerun()
+
+
+def render_menu_page():
+    render_header()
+    render_info_bar()
+    
+    if st.session_state.active_order_id:
+        order = get_order(st.session_state.active_order_id)
+        if order and order["status"] != "delivered":
+            st.info(f"🚗 You have an active order: **{st.session_state.active_order_id}** - Status: **{order['status'].replace('_', ' ').title()}**")
+            if st.button("📍 Track My Order", type="primary"):
+                st.session_state.view = "tracking"
+                st.rerun()
+            st.markdown("---")
+    
+    render_featured()
+    
+    menu_col, cart_col = st.columns([3, 1])
+    
+    with menu_col:
+        category_icons = {"Pizzas": "🍕", "Sides": "🍟", "Drinks": "🥤", "Desserts": "🍰"}
+        
+        for category, items in MENU.items():
+            icon = category_icons.get(category, "🍽️")
+            st.markdown(f"### {icon} {category}")
+            
+            # Use container instead of nested columns
+            for idx, item in enumerate(items):
+                if idx % 3 == 0:
+                    cols = st.columns(3)
+                with cols[idx % 3]:
+                    render_menu_item(item, category)
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+    
+    with cart_col:
+        render_cart_panel()
+
+
+def render_tracking_page():
     order_id = st.session_state.active_order_id
     
     if not order_id:
@@ -380,267 +726,293 @@ def render_tracking():
     
     if not order:
         st.error("Order not found")
-        st.session_state.view = "menu"
-        st.session_state.active_order_id = None
-        return
-    
-    status = order["status"]
-    
-    if status == "delivered":
-        render_rating(order)
-        return
-    
-    st.markdown(f"""
-    <div class="hero-header">
-        <h2 style="margin: 0;">Order {order_id}</h2>
-        <p style="margin: 5px 0 0 0; opacity: 0.9;">Placed at {order['created_at'][:16].replace('T', ' ')}</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    steps = [
-        ("📋", "Confirmed", ["pending", "preparing", "ready", "picked_up", "on_the_way", "delivered"]),
-        ("👨‍🍳", "Preparing", ["preparing", "ready", "picked_up", "on_the_way", "delivered"]),
-        ("✅", "Ready", ["ready", "picked_up", "on_the_way", "delivered"]),
-        ("🚗", "On the Way", ["on_the_way", "delivered"]),
-        ("🏠", "Delivered", ["delivered"]),
-    ]
-    
-    cols = st.columns(5)
-    for i, (icon, label, active_statuses) in enumerate(steps):
-        with cols[i]:
-            is_active = status in active_statuses
-            is_current = (status in active_statuses and 
-                         (i == len(steps) - 1 or status not in steps[i+1][2]))
-            
-            color = "#28A745" if is_active and not is_current else "#FF6B35" if is_current else "#555"
-            st.markdown(f"""
-            <div style="text-align: center;">
-                <div style="font-size: 28px; opacity: {'1' if is_active else '0.4'};">{icon}</div>
-                <div style="font-size: 12px; color: {color}; font-weight: {'bold' if is_current else 'normal'};">{label}</div>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    status_messages = {
-        "pending": ("🍕", "Order Received!", "We're preparing your order...", "#FFC107"),
-        "preparing": ("👨‍🍳", "In the Kitchen", "Your pizza is being made with love!", "#FF9800"),
-        "ready": ("✅", "Ready for Pickup", "Driver is on the way to pick up your order", "#17A2B8"),
-        "picked_up": ("📦", "Picked Up!", "Your order is with the driver", "#17A2B8"),
-        "on_the_way": ("🚗", "On the Way!", "Your driver is heading to you", "#007BFF"),
-    }
-    
-    if status in status_messages:
-        icon, title, message, color = status_messages[status]
-        
-        eta = order.get("eta_minutes", 20)
-        st.markdown(f"""
-        <div class="order-status" style="background: linear-gradient(135deg, {color} 0%, {color}dd 100%); color: white;">
-            <div style="font-size: 48px;">{icon}</div>
-            <h2 style="margin: 10px 0;">{title}</h2>
-            <p style="opacity: 0.9;">{message}</p>
-            <div class="eta-display">{eta} min</div>
-            <p style="opacity: 0.7; margin-top: 5px;">Estimated arrival</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    if status in ["picked_up", "on_the_way"]:
-        st.markdown("### 🗺️ Live Tracking")
-        
-        driver_lat = order.get("driver_lat", STORE_LAT)
-        driver_lon = order.get("driver_lon", STORE_LON)
-        customer_lat = order["lat"]
-        customer_lon = order["lon"]
-        
-        center_lat = (driver_lat + customer_lat) / 2
-        center_lon = (driver_lon + customer_lon) / 2
-        
-        driver_layer = pdk.Layer(
-            "ScatterplotLayer",
-            data=[{"lat": driver_lat, "lon": driver_lon, "name": "Driver"}],
-            get_position=["lon", "lat"],
-            get_color=[41, 181, 232, 255],
-            get_radius=100,
-            pickable=True,
-        )
-        
-        customer_layer = pdk.Layer(
-            "ScatterplotLayer",
-            data=[{"lat": customer_lat, "lon": customer_lon, "name": "You"}],
-            get_position=["lon", "lat"],
-            get_color=[40, 167, 69, 255],
-            get_radius=100,
-            pickable=True,
-        )
-        
-        route_layer = pdk.Layer(
-            "PathLayer",
-            data=[{
-                "path": [[driver_lon, driver_lat], [customer_lon, customer_lat]],
-                "color": [255, 107, 53]
-            }],
-            get_path="path",
-            get_color="color",
-            width_scale=20,
-            width_min_pixels=3,
-        )
-        
-        view_state = pdk.ViewState(
-            latitude=center_lat,
-            longitude=center_lon,
-            zoom=13,
-            pitch=0,
-        )
-        
-        st.pydeck_chart(pdk.Deck(
-            layers=[route_layer, driver_layer, customer_layer],
-            initial_view_state=view_state,
-            map_style="mapbox://styles/mapbox/dark-v10",
-        ), use_container_width=True)
-        
-        state = load_state()
-        driver_info = state["drivers"].get(order["driver_id"], {})
-        st.markdown(f"""
-        <div style="background: #2d2d44; padding: 15px; border-radius: 12px; margin-top: 15px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <strong style="color: white; font-size: 16px;">🚗 {driver_info.get('name', 'Driver')}</strong><br>
-                    <span style="color: #aaa;">{driver_info.get('vehicle', '')} • {driver_info.get('color', '')}</span>
-                </div>
-                <div style="text-align: right;">
-                    <span style="color: #FFD700; font-size: 18px;">⭐ {driver_info.get('rating', 4.8)}</span>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📞 Call Driver", use_container_width=True):
-                st.info(f"Calling {driver_info.get('name', 'Driver')}...")
-        with col2:
-            if st.button("💬 Message", use_container_width=True):
-                st.info("Opening chat...")
-    
-    st.markdown("### 📦 Order Details")
-    with st.expander("View items", expanded=False):
-        for item in order["items"]:
-            st.markdown(f"• {item}")
-        st.markdown(f"**Total: ${order['total']:.2f}**")
-        st.markdown(f"**Delivering to:** {order['address']}")
-        if order.get("special_instructions"):
-            st.markdown(f"**Note:** {order['special_instructions']}")
-    
-    if status not in ["delivered"]:
-        time.sleep(3)
-        st.rerun()
-
-
-def render_rating(order):
-    st.markdown("""
-    <div style="text-align: center; padding: 20px;">
-        <div style="font-size: 80px;">🎉</div>
-        <h1 style="color: white;">Order Delivered!</h1>
-        <p style="color: #aaa;">Your pizza has arrived. Enjoy!</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    if order.get("rating"):
-        st.success(f"Thanks for rating! You gave {order['rating']} stars.")
-        if st.button("Order Again 🍕", use_container_width=True, type="primary"):
+        if st.button("← Back to Menu"):
             st.session_state.view = "menu"
             st.session_state.active_order_id = None
             st.rerun()
         return
     
-    st.markdown("### How was your delivery?")
+    status = order["status"]
     
-    rating = st.slider("Rate your experience", 1, 5, 5, format="%d ⭐")
+    if status == "delivered":
+        render_rating_page(order)
+        return
     
-    st.markdown("### Add a tip for your driver")
-    tip_options = [0, 2, 3, 5, 8]
-    tip_cols = st.columns(5)
+    render_header()
     
-    if "selected_tip" not in st.session_state:
-        st.session_state.selected_tip = 3
+    col1, col2 = st.columns([2, 1])
     
-    for i, tip in enumerate(tip_options):
-        with tip_cols[i]:
-            label = "No tip" if tip == 0 else f"${tip}"
-            if st.button(label, key=f"tip_{tip}", use_container_width=True,
-                        type="primary" if st.session_state.selected_tip == tip else "secondary"):
-                st.session_state.selected_tip = tip
+    with col1:
+        st.markdown(f"""
+        <div class="tracking-card">
+            <h2 style="color:white;margin:0;">Order {order_id}</h2>
+            <p style="color:#a0a0b0;">Placed at {order['created_at'][:16].replace('T', ' ')}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        steps = [
+            ("📋", "Confirmed", ["pending", "preparing", "ready", "picked_up", "on_the_way", "delivered"]),
+            ("👨‍🍳", "Preparing", ["preparing", "ready", "picked_up", "on_the_way", "delivered"]),
+            ("✅", "Ready", ["ready", "picked_up", "on_the_way", "delivered"]),
+            ("🚗", "On the Way", ["on_the_way", "delivered"]),
+            ("🏠", "Delivered", ["delivered"]),
+        ]
+        
+        cols = st.columns(5)
+        for i, (icon, label, active_statuses) in enumerate(steps):
+            with cols[i]:
+                is_active = status in active_statuses
+                is_current = (status in active_statuses and (i == len(steps) - 1 or status not in steps[i+1][2]))
+                color = "#28A745" if is_active and not is_current else "#FF6B35" if is_current else "#555"
+                opacity = "1" if is_active else "0.4"
+                st.markdown(f"""
+                <div style="text-align:center;">
+                    <div style="font-size:32px;opacity:{opacity};">{icon}</div>
+                    <div style="font-size:12px;color:{color};font-weight:{'bold' if is_current else 'normal'};">{label}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        status_info = {
+            "pending": ("🍕", "Order Received!", "We're getting your order ready...", "#FFC107"),
+            "preparing": ("👨‍🍳", "In the Kitchen", "Your pizza is being made with love!", "#FF9800"),
+            "ready": ("✅", "Ready!", "Driver is picking up your order", "#17A2B8"),
+            "picked_up": ("📦", "Picked Up", "Your order is with the driver", "#17A2B8"),
+            "on_the_way": ("🚗", "On the Way!", "Your driver is heading to you", "#007BFF"),
+        }
+        
+        if status in status_info:
+            icon, title, msg, color = status_info[status]
+            eta = order.get("eta_minutes", 20)
+            
+            # Show progress bar for preparing status
+            if status == "preparing":
+                kitchen_progress = order.get("kitchen_progress", 0)
+                st.markdown(f"""
+                <div style="background:linear-gradient(135deg,{color} 0%,{color}dd 100%);padding:30px;border-radius:16px;text-align:center;color:white;">
+                    <div style="font-size:60px;">{icon}</div>
+                    <h2 style="margin:10px 0;">{title}</h2>
+                    <p style="opacity:0.9;">{msg}</p>
+                    <div style="background:rgba(255,255,255,0.3);border-radius:10px;height:20px;margin:15px 0;">
+                        <div style="background:white;border-radius:10px;height:20px;width:{kitchen_progress}%;transition:width 0.5s;"></div>
+                    </div>
+                    <div style="font-size:24px;font-weight:bold;">{kitchen_progress}% Complete</div>
+                </div>
+                """, unsafe_allow_html=True)
+            elif status == "on_the_way":
+                delivery_progress = order.get("delivery_progress", 0)
+                st.markdown(f"""
+                <div style="background:linear-gradient(135deg,{color} 0%,{color}dd 100%);padding:30px;border-radius:16px;text-align:center;color:white;">
+                    <div style="font-size:60px;">{icon}</div>
+                    <h2 style="margin:10px 0;">{title}</h2>
+                    <p style="opacity:0.9;">{msg}</p>
+                    <div style="font-size:48px;font-weight:bold;">{eta} min</div>
+                    <p style="opacity:0.7;">Estimated arrival</p>
+                    <div style="background:rgba(255,255,255,0.3);border-radius:10px;height:10px;margin-top:15px;">
+                        <div style="background:white;border-radius:10px;height:10px;width:{delivery_progress}%;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div style="background:linear-gradient(135deg,{color} 0%,{color}dd 100%);padding:30px;border-radius:16px;text-align:center;color:white;">
+                    <div style="font-size:60px;">{icon}</div>
+                    <h2 style="margin:10px 0;">{title}</h2>
+                    <p style="opacity:0.9;">{msg}</p>
+                    <div style="font-size:48px;font-weight:bold;">{eta} min</div>
+                    <p style="opacity:0.7;">Estimated arrival</p>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        if status in ["picked_up", "on_the_way"]:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("### 🗺️ Live Tracking")
+            
+            driver_lat = order.get("driver_lat", STORE_LAT)
+            driver_lon = order.get("driver_lon", STORE_LON)
+            customer_lat = order["lat"]
+            customer_lon = order["lon"]
+            
+            center_lat = (driver_lat + customer_lat) / 2
+            center_lon = (driver_lon + customer_lon) / 2
+            
+            # Use route from unified state if available, else fetch from OSRM
+            route_coords = order.get("route_coords")
+            if not route_coords:
+                route_coords = get_cached_route(STORE_LON, STORE_LAT, customer_lon, customer_lat)
+            
+            # Get active traffic zones (same as driver/ops apps)
+            traffic_zones = get_traffic_zones_for_map()
+            
+            layers = []
+            
+            # Traffic zones layer (render first, behind other elements)
+            if traffic_zones:
+                layers.append(pdk.Layer(
+                    "ScatterplotLayer",
+                    data=traffic_zones,
+                    get_position=["lon", "lat"],
+                    get_color="color",
+                    get_radius="radius",
+                    pickable=True,
+                    opacity=0.3,
+                ))
+            
+            # Route line
+            layers.append(pdk.Layer("PathLayer", data=[{"path": route_coords, "color": [76, 175, 80, 200]}], get_path="path", get_color="color", width_scale=20, width_min_pixels=3))
+            # Store marker (orange)
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": STORE_LAT, "lon": STORE_LON, "name": "Chicago Loop Pizza"}], get_position=["lon", "lat"], get_color=[255, 87, 51, 255], get_radius=100, pickable=True))
+            # Driver marker (green)
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": driver_lat, "lon": driver_lon, "name": "Driver"}], get_position=["lon", "lat"], get_color=[52, 199, 89, 255], get_radius=80, pickable=True))
+            # Customer marker (blue)
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": customer_lat, "lon": customer_lon, "name": "You"}], get_position=["lon", "lat"], get_color=[33, 150, 243, 255], get_radius=80, pickable=True))
+            
+            st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=14, pitch=45), map_style="mapbox://styles/mapbox/dark-v10"), use_container_width=True)
+            st.caption("🟠 Store  •  🟢 Driver  •  🔵 Your location  •  🟢 Route  •  🔴 Traffic Zone")
+        
+        elif status in ["pending", "preparing", "ready"]:
+            # Show delivery route preview during preparation
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("### 🗺️ Delivery Route")
+            
+            customer_lat = order["lat"]
+            customer_lon = order["lon"]
+            
+            center_lat = (STORE_LAT + customer_lat) / 2
+            center_lon = (STORE_LON + customer_lon) / 2
+            
+            # Use route from unified state if available, else fetch from OSRM
+            route_coords = order.get("route_coords")
+            if not route_coords:
+                route_coords = get_cached_route(STORE_LON, STORE_LAT, customer_lon, customer_lat)
+            
+            # Get active traffic zones
+            traffic_zones = get_traffic_zones_for_map()
+            
+            layers = []
+            
+            # Traffic zones layer
+            if traffic_zones:
+                layers.append(pdk.Layer(
+                    "ScatterplotLayer",
+                    data=traffic_zones,
+                    get_position=["lon", "lat"],
+                    get_color="color",
+                    get_radius="radius",
+                    pickable=True,
+                    opacity=0.3,
+                ))
+            
+            # Route line (dashed style effect using lighter color)
+            layers.append(pdk.Layer("PathLayer", data=[{"path": route_coords, "color": [76, 175, 80, 120]}], get_path="path", get_color="color", width_scale=20, width_min_pixels=3))
+            # Store marker (orange)
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": STORE_LAT, "lon": STORE_LON, "name": "Chicago Loop Pizza"}], get_position=["lon", "lat"], get_color=[255, 87, 51, 255], get_radius=100, pickable=True))
+            # Customer marker (blue)
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": customer_lat, "lon": customer_lon, "name": "Your Location"}], get_position=["lon", "lat"], get_color=[33, 150, 243, 255], get_radius=80, pickable=True))
+            
+            st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=13, pitch=45), map_style="mapbox://styles/mapbox/dark-v10"), use_container_width=True)
+            st.caption("🟠 Store  •  🔵 Your location  •  🟢 Planned Route  •  🔴 Traffic Zone")
+    
+    with col2:
+        st.markdown("### 📦 Order Details")
+        
+        state = load_state()
+        driver_info = state["drivers"].get(order.get("driver_id"), {}) if order.get("driver_id") else {}
+        
+        if order.get("driver_id") and driver_info:
+            st.markdown(f"""
+            <div style="background:#2a2a40;padding:15px;border-radius:12px;margin-bottom:15px;">
+                <div style="color:#a0a0b0;font-size:12px;margin-bottom:5px;">YOUR DRIVER</div>
+                <div style="color:white;font-weight:bold;font-size:16px;">🚗 {driver_info.get('name', 'Driver')}</div>
+                <div style="color:#a0a0b0;font-size:13px;">{driver_info.get('vehicle', '')} • {driver_info.get('color', '')}</div>
+                <div style="color:#FFD700;margin-top:5px;">⭐ {driver_info.get('rating', 4.8)}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        elif status in ["pending", "preparing"]:
+            st.markdown("""
+            <div style="background:#2a2a40;padding:15px;border-radius:12px;margin-bottom:15px;">
+                <div style="color:#a0a0b0;font-size:12px;margin-bottom:5px;">DRIVER</div>
+                <div style="color:white;font-size:14px;">Will be assigned when order is 80% ready</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("**Items:**")
+        for item in order["items"]:
+            st.markdown(f"• {item}")
+        
+        st.markdown(f"**Total:** ${order['total']:.2f}")
+        st.markdown(f"**Address:** {order['address']}")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        if st.button("← Back to Menu", use_container_width=True):
+            st.session_state.view = "menu"
+            st.rerun()
+    
+    # Auto-refresh is handled by st_autorefresh
+
+
+def render_rating_page(order):
+    st.markdown("""
+    <div style="text-align:center;padding:40px;">
+        <div style="font-size:100px;">🎉</div>
+        <h1 style="color:white;">Order Delivered!</h1>
+        <p style="color:#a0a0b0;">Your pizza has arrived. Enjoy!</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if order.get("rating"):
+        st.success(f"Thanks for rating! You gave {order['rating']} stars.")
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("🍕 Order Again", use_container_width=True, type="primary"):
+                st.session_state.view = "menu"
+                st.session_state.active_order_id = None
                 st.rerun()
+        return
     
-    st.markdown("<br>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 2, 1])
     
-    if st.button("Submit Rating", use_container_width=True, type="primary"):
-        rate_order(order["order_id"], rating, st.session_state.selected_tip)
-        st.balloons()
-        st.success("Thanks for your feedback!")
-        time.sleep(2)
-        st.rerun()
-    
-    if st.button("Skip", use_container_width=True):
-        st.session_state.view = "menu"
-        st.session_state.active_order_id = None
-        st.rerun()
-
-
-def check_for_active_orders():
-    if st.session_state.active_order_id:
-        order = get_order(st.session_state.active_order_id)
-        if order and order["status"] != "delivered":
-            return True
-        elif order and order["status"] == "delivered" and not order.get("rating"):
-            return True
-    return False
+    with col2:
+        st.markdown("### How was your delivery?")
+        rating = st.slider("Rate your experience", 1, 5, 5, format="%d ⭐")
+        
+        st.markdown("### Add a tip for your driver")
+        tip_options = [0, 2, 3, 5, 8]
+        tip_cols = st.columns(5)
+        
+        for i, tip in enumerate(tip_options):
+            with tip_cols[i]:
+                label = "No tip" if tip == 0 else f"${tip}"
+                if st.button(label, key=f"tip_{tip}", use_container_width=True, type="primary" if st.session_state.selected_tip == tip else "secondary"):
+                    st.session_state.selected_tip = tip
+                    st.rerun()
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        if st.button("✅ Submit Rating", use_container_width=True, type="primary"):
+            rate_order(order["order_id"], rating, st.session_state.selected_tip)
+            st.balloons()
+            st.success("Thanks for your feedback!")
+            time.sleep(1)
+            st.session_state.view = "menu"
+            st.session_state.active_order_id = None
+            st.rerun()
+        
+        if st.button("Skip", use_container_width=True):
+            st.session_state.view = "menu"
+            st.session_state.active_order_id = None
+            st.rerun()
 
 
 def main():
-    with st.sidebar:
-        st.markdown("### 👤 Account")
-        st.session_state.customer_name = st.text_input("Name", st.session_state.customer_name)
-        st.session_state.customer_phone = st.text_input("Phone", st.session_state.customer_phone)
-        
-        st.divider()
-        
-        if st.session_state.active_order_id:
-            if st.button("📍 Track Order", use_container_width=True):
-                st.session_state.view = "tracking"
-                st.rerun()
-        
-        if st.button("🍕 Menu", use_container_width=True):
-            st.session_state.view = "menu"
-            st.rerun()
-        
-        st.divider()
-        
-        st.caption("Demo Controls")
-        if st.button("🎬 Simulate Delivery", use_container_width=True):
-            if st.session_state.active_order_id:
-                from shared_state import update_order_status
-                order = get_order(st.session_state.active_order_id)
-                if order:
-                    status_flow = ["pending", "preparing", "ready", "picked_up", "on_the_way", "delivered"]
-                    current_idx = status_flow.index(order["status"]) if order["status"] in status_flow else 0
-                    if current_idx < len(status_flow) - 1:
-                        update_order_status(st.session_state.active_order_id, status_flow[current_idx + 1])
-                        st.rerun()
-    
-    if check_for_active_orders() and st.session_state.view == "menu":
-        st.info(f"📍 You have an active order: {st.session_state.active_order_id}")
-        if st.button("Track Order →"):
-            st.session_state.view = "tracking"
-            st.rerun()
-        st.divider()
-    
     if st.session_state.view == "menu":
-        render_menu()
-    elif st.session_state.view == "cart":
-        render_cart()
+        render_menu_page()
     elif st.session_state.view == "tracking":
-        render_tracking()
+        render_tracking_page()
 
 
 if __name__ == "__main__":

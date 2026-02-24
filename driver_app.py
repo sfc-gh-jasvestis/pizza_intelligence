@@ -10,11 +10,23 @@ from datetime import datetime
 import random
 import requests
 
-from shared_state import (
-    load_state, save_state, get_driver_orders, get_driver_info,
-    update_order_status, update_driver_location, get_order, create_demo_order
+try:
+    from streamlit_autorefresh import st_autorefresh
+    AUTOREFRESH_AVAILABLE = True
+except ImportError:
+    AUTOREFRESH_AVAILABLE = False
+
+from unified_state import (
+    load_state, get_driver_orders, get_driver_info, get_order,
+    driver_pickup, start_delivery, advance_delivery, run_simulation_step, STORE_LAT, STORE_LON
 )
-from menu_data import STORE_LAT, STORE_LON, STORE_NAME, DRIVERS
+from menu_data import STORE_NAME, DRIVERS
+
+try:
+    from shared_routes import get_route_from_osrm, get_driver_position_on_route
+    ROUTES_AVAILABLE = True
+except ImportError:
+    ROUTES_AVAILABLE = False
 
 # Page config
 st.set_page_config(
@@ -23,6 +35,13 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+
+# Auto-refresh every 3 seconds to pick up state changes
+if AUTOREFRESH_AVAILABLE:
+    st_autorefresh(interval=3000, limit=None, key="driver_autorefresh")
+
+# Run simulation step on each refresh to advance orders
+run_simulation_step()
 
 # Custom CSS for mobile-friendly driver interface
 st.markdown("""
@@ -43,6 +62,7 @@ st.markdown("""
         padding: 20px;
         margin-bottom: 15px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        color: #333333;
     }
     .status-btn {
         padding: 15px 30px;
@@ -63,6 +83,7 @@ st.markdown("""
         border-radius: 8px;
         padding: 12px;
         margin: 10px 0;
+        color: #333333;
     }
     .big-text {
         font-size: 28px;
@@ -92,10 +113,16 @@ TRAFFIC_HOTSPOTS = {
         {"name": "Lake Shore Dr & Ohio", "lat": 41.8920, "lon": -87.6130, "radius": 300, "reason": "Commuter backup"},
         {"name": "Congress Pkwy", "lat": 41.8754, "lon": -87.6290, "radius": 280, "reason": "Highway merge"},
         {"name": "Chicago & State", "lat": 41.8967, "lon": -87.6280, "radius": 200, "reason": "Transit hub"},
+        {"name": "Clark & Division", "lat": 41.9040, "lon": -87.6315, "radius": 220, "reason": "Nightlife district"},
     ],
     "lunch": [
         {"name": "Randolph & Michigan", "lat": 41.8846, "lon": -87.6246, "radius": 200, "reason": "Millennium Park lunch rush"},
         {"name": "Adams & Wacker", "lat": 41.8792, "lon": -87.6370, "radius": 180, "reason": "Willis Tower lunch crowd"},
+        {"name": "Hubbard & Clark", "lat": 41.8898, "lon": -87.6310, "radius": 180, "reason": "River North restaurants"},
+    ],
+    "weekend": [
+        {"name": "Navy Pier area", "lat": 41.8917, "lon": -87.6059, "radius": 400, "reason": "Tourist attraction"},
+        {"name": "Magnificent Mile", "lat": 41.8950, "lon": -87.6245, "radius": 300, "reason": "Shopping traffic"},
     ],
 }
 
@@ -114,6 +141,7 @@ def get_active_traffic_hotspots():
     """Get currently active traffic hotspots based on time of day."""
     now = datetime.now()
     hour = now.hour
+    weekday = now.weekday()
     
     active = list(TRAFFIC_HOTSPOTS["always"])
     
@@ -123,6 +151,9 @@ def get_active_traffic_hotspots():
     if 11 <= hour <= 14:
         active.extend(TRAFFIC_HOTSPOTS["lunch"])
     
+    if weekday >= 5:  # Saturday or Sunday
+        active.extend(TRAFFIC_HOTSPOTS["weekend"])
+    
     return active
 
 
@@ -131,6 +162,8 @@ if "driver_id" not in st.session_state:
     st.session_state.driver_id = None
 if "simulation_active" not in st.session_state:
     st.session_state.simulation_active = False
+if "last_refresh" not in st.session_state:
+    st.session_state.last_refresh = 0
 
 
 def simulate_driver_movement(order):
@@ -155,20 +188,11 @@ def simulate_driver_movement(order):
 
 
 @st.cache_data(ttl=300)
-def get_route_from_osrm(start_lon, start_lat, end_lon, end_lat):
-    """Get actual road route from OSRM routing service."""
-    try:
-        url = f"http://router.project-osrm.org/route/v1/driving/{start_lon},{start_lat};{end_lon},{end_lat}?overview=full&geometries=geojson"
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("routes") and len(data["routes"]) > 0:
-                coords = data["routes"][0]["geometry"]["coordinates"]
-                duration_sec = data["routes"][0].get("duration", 0)
-                distance_m = data["routes"][0].get("distance", 0)
-                return coords, duration_sec, distance_m
-    except Exception:
-        pass
+def get_cached_route(start_lon, start_lat, end_lon, end_lat):
+    """Get actual road route - cached version."""
+    if ROUTES_AVAILABLE:
+        coords, duration, distance = get_route_from_osrm(start_lon, start_lat, end_lon, end_lat)
+        return coords, duration, distance
     return [[start_lon, start_lat], [end_lon, end_lat]], 0, 0
 
 
@@ -184,9 +208,11 @@ def render_order_map(order):
     center_lat = (driver_lat + customer_lat) / 2
     center_lon = (driver_lon + customer_lon) / 2
     
-    # Get actual road route from OSRM
-    route_result = get_route_from_osrm(driver_lon, driver_lat, customer_lon, customer_lat)
-    route_coords = route_result[0] if isinstance(route_result, tuple) else route_result
+    # Use route from unified state if available, else fetch from OSRM
+    route_coords = order.get("route_coords")
+    if not route_coords:
+        route_result = get_cached_route(STORE_LON, STORE_LAT, customer_lon, customer_lat)
+        route_coords = route_result[0] if isinstance(route_result, tuple) else route_result
     
     # Get active traffic hotspots
     active_hotspots = get_active_traffic_hotspots()
@@ -411,29 +437,28 @@ def render_order_card(order, driver_info):
     
     # Action buttons based on status
     if status == "preparing":
-        st.info("⏳ Order is being prepared in the kitchen...")
-        if st.button("🔄 Check if Ready", use_container_width=True, type="secondary"):
-            st.rerun()
+        kitchen_progress = order.get("kitchen_progress", 0)
+        st.info(f"⏳ Order is being prepared... {kitchen_progress}% complete")
+        st.progress(kitchen_progress / 100)
     
     elif status == "ready":
         st.success("✅ Order is ready! Head to the store to pick it up.")
         if st.button("📦 PICKED UP", use_container_width=True, type="primary"):
-            update_order_status(order["order_id"], "picked_up")
+            driver_pickup(order["order_id"])
             st.toast("Order picked up! Start your delivery.", icon="📦")
             st.rerun()
     
     elif status == "picked_up":
         st.info("📦 You have the order. Start driving to the customer!")
         if st.button("🚗 START DELIVERY", use_container_width=True, type="primary"):
-            update_order_status(order["order_id"], "on_the_way")
-            # Set initial position at store
-            update_driver_location(order["order_id"], STORE_LAT, STORE_LON, 15)
+            start_delivery(order["order_id"])
             st.toast("Delivery started! Drive safely.", icon="🚗")
             st.rerun()
     
     elif status == "on_the_way":
-        # Simulate movement
-        new_lat, new_lon, eta = simulate_driver_movement(order)
+        delivery_progress = order.get("delivery_progress", 0)
+        st.info(f"🚗 Delivery in progress... {delivery_progress}% of the way")
+        st.progress(delivery_progress / 100)
         
         col1, col2 = st.columns(2)
         with col1:
@@ -442,13 +467,6 @@ def render_order_card(order, driver_info):
         with col2:
             if st.button("⚠️ Report Issue", use_container_width=True):
                 st.warning("Issue reported to dispatch.")
-        
-        if st.button("✅ DELIVERED", use_container_width=True, type="primary"):
-            update_order_status(order["order_id"], "delivered")
-            st.balloons()
-            st.toast("Delivery complete! Great job!", icon="🎉")
-            time.sleep(1)
-            st.rerun()
 
 
 def render_driver_stats(driver_info, driver_id):
@@ -456,12 +474,20 @@ def render_driver_stats(driver_info, driver_id):
     state = load_state()
     driver_data = state["drivers"].get(driver_id, {})
     
+    # Get delivery history for this driver
+    delivery_history = driver_data.get("delivery_history", [])
+    deliveries_today = driver_data.get('deliveries_today', 0) + len(delivery_history)
+    tips_today = driver_data.get('tips_today', 0) or 0
+    for delivery in delivery_history:
+        tip = delivery.get("tip") or 0
+        tips_today += tip
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
         st.markdown(f"""
         <div class="stats-card">
-            <div style="font-size: 28px; font-weight: bold;">{driver_data.get('deliveries_today', 0)}</div>
+            <div style="font-size: 28px; font-weight: bold;">{deliveries_today}</div>
             <div style="font-size: 12px; opacity: 0.9;">Deliveries Today</div>
         </div>
         """, unsafe_allow_html=True)
@@ -469,7 +495,7 @@ def render_driver_stats(driver_info, driver_id):
     with col2:
         st.markdown(f"""
         <div class="stats-card">
-            <div style="font-size: 28px; font-weight: bold;">${driver_data.get('tips_today', 0):.2f}</div>
+            <div style="font-size: 28px; font-weight: bold;">${tips_today:.2f}</div>
             <div style="font-size: 12px; opacity: 0.9;">Tips Earned</div>
         </div>
         """, unsafe_allow_html=True)
@@ -483,25 +509,112 @@ def render_driver_stats(driver_info, driver_id):
         """, unsafe_allow_html=True)
 
 
+def render_delivery_history(driver_id):
+    """Render delivery history for the driver."""
+    state = load_state()
+    driver_data = state["drivers"].get(driver_id, {})
+    delivery_history = driver_data.get("delivery_history", [])
+    
+    if not delivery_history:
+        return
+    
+    st.markdown("### 📜 Recent Deliveries")
+    
+    total_earnings = 0
+    for delivery in sorted(delivery_history, key=lambda x: x.get("completed_at", ""), reverse=True)[:5]:
+        tip = delivery.get("tip") or 0
+        total_earnings += tip
+        completed = delivery.get("completed_at", "")
+        if completed:
+            try:
+                completed_time = datetime.fromisoformat(completed.replace('Z', '+00:00'))
+                time_str = completed_time.strftime("%I:%M %p")
+            except:
+                time_str = "Earlier"
+        else:
+            time_str = "Earlier"
+        
+        st.markdown(f"""
+        <div style="background: #2d2d44; padding: 12px; border-radius: 8px; margin: 5px 0; display: flex; justify-content: space-between;">
+            <div>
+                <strong style="color: white;">{delivery.get('order_id', 'Order')}</strong><br>
+                <span style="color: #aaa;">{delivery.get('customer_name', 'Customer')} • {delivery.get('zone', 'Loop')}</span>
+            </div>
+            <div style="text-align: right;">
+                <span style="color: #4CAF50; font-weight: bold;">+${tip:.2f}</span><br>
+                <span style="color: #888; font-size: 11px;">{time_str}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    if total_earnings > 0:
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); padding: 15px; border-radius: 10px; margin-top: 15px; text-align: center;">
+            <div style="font-size: 14px; color: rgba(255,255,255,0.9);">Today's Earnings</div>
+            <div style="font-size: 32px; font-weight: bold; color: white;">${total_earnings:.2f}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
 def main():
-    # Driver selection (in real app, this would be login)
+    # Check if any driver has an active order - auto-select for demo
+    state = load_state()
+    drivers = state.get("drivers", {})
+    
+    # Find driver with active order
+    active_driver = None
+    for driver_id, driver in drivers.items():
+        if driver.get("current_order"):
+            active_driver = driver_id
+            break
+    
+    # Auto-select driver with active order for seamless demo
+    if active_driver and not st.session_state.driver_id:
+        st.session_state.driver_id = active_driver
+    
+    # Check if currently selected driver's order was delivered - auto-reset
+    if st.session_state.driver_id:
+        driver_data = drivers.get(st.session_state.driver_id, {})
+        current_order_id = driver_data.get("current_order")
+        
+        if current_order_id:
+            # Driver has active order - check if it just became delivered
+            order = state.get("orders", {}).get(current_order_id, {})
+            if order.get("status") == "delivered":
+                st.markdown("""
+                <div style="text-align: center; padding: 100px 20px;">
+                    <div style="font-size: 80px;">🎉</div>
+                    <h2 style="color: #4CAF50;">Delivery Complete!</h2>
+                    <p style="color: #aaa;">Great job! Returning to driver list...</p>
+                </div>
+                """, unsafe_allow_html=True)
+                time.sleep(2)
+                st.session_state.driver_id = None
+                st.rerun()
+                return
+    
+    # Driver selection screen
     if not st.session_state.driver_id:
         st.markdown("""
         <div style="text-align: center; padding: 40px;">
             <h1>🚗 Pizza Driver App</h1>
-            <p style="color: #aaa;">Select your driver profile to start</p>
+            <p style="color: #aaa;">Waiting for order assignment...</p>
         </div>
         """, unsafe_allow_html=True)
         
-        state = load_state()
-        drivers = state.get("drivers", {})
-        
+        # Show all drivers with their status
         for driver_id, driver in drivers.items():
+            has_order = driver.get("current_order")
+            status_badge = "🟢 Active Order" if has_order else "⚪ Available"
+            
             col1, col2 = st.columns([3, 1])
             with col1:
                 st.markdown(f"""
-                <div style="background: #2d2d44; padding: 15px; border-radius: 10px; margin: 5px 0;">
-                    <strong style="color: white;">{driver['name']}</strong><br>
+                <div style="background: {'#2d4d2d' if has_order else '#2d2d44'}; padding: 15px; border-radius: 10px; margin: 5px 0; border: {'2px solid #4CAF50' if has_order else 'none'};">
+                    <div style="display: flex; justify-content: space-between;">
+                        <strong style="color: white;">{driver['name']}</strong>
+                        <span style="color: {'#4CAF50' if has_order else '#aaa'}; font-size: 12px;">{status_badge}</span>
+                    </div>
                     <span style="color: #aaa;">{driver['vehicle']} • ⭐ {driver['rating']}</span>
                 </div>
                 """, unsafe_allow_html=True)
@@ -511,12 +624,7 @@ def main():
                     st.rerun()
         
         st.divider()
-        
-        # Demo button to create a test order
-        if st.button("🎬 Create Demo Order", use_container_width=True, type="primary"):
-            order_id, driver_id = create_demo_order()
-            st.success(f"Created {order_id} for driver {driver_id}")
-            st.rerun()
+        st.info("📱 Orders assigned automatically when kitchen reaches 80%")
         
         return
     
@@ -529,6 +637,11 @@ def main():
         st.session_state.driver_id = None
         st.rerun()
         return
+    
+    # Switch driver button at top
+    if st.button("🚪 Switch Driver", use_container_width=False):
+        st.session_state.driver_id = None
+        st.rerun()
     
     # Header
     st.markdown(f"""
@@ -550,7 +663,7 @@ def main():
     
     st.divider()
     
-    # Get current orders
+    # Get current orders for this driver
     orders = get_driver_orders(driver_id)
     
     if not orders:
@@ -562,35 +675,13 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
-        # Demo button
-        if st.button("🎬 Create Demo Order for Me", use_container_width=True):
-            from shared_state import create_order, assign_driver
-            import random
-            
-            order_id = f"ORD-{random.randint(10000, 99999)}"
-            create_order(
-                order_id=order_id,
-                customer_name="Demo Customer",
-                customer_phone="555-0000",
-                items=["Large Pepperoni Pizza", "Garlic Bread", "2L Coke"],
-                address="123 Demo Street, Chicago",
-                zone="Loop",
-                lat=41.8819 + random.uniform(-0.01, 0.01),
-                lon=-87.6278 + random.uniform(-0.01, 0.01),
-                total=round(random.uniform(25, 50), 2),
-                special_instructions="Demo order - ring doorbell"
-            )
-            assign_driver(order_id, driver_id)
-            # Set to ready for faster demo
-            update_order_status(order_id, "ready")
-            st.rerun()
+        st.info("📱 Orders assigned when kitchen reaches 80%")
         
-        # Auto-refresh
-        time.sleep(3)
-        st.rerun()
+        # Show delivery history when no active orders
+        render_delivery_history(driver_id)
     else:
         # Show current order
-        current_order = orders[0]  # Most recent/urgent
+        current_order = orders[0]
         
         # Map
         st.markdown("### 🗺️ Delivery Route")
@@ -609,18 +700,6 @@ def main():
                     <span style="color: #aaa;">{order['zone']} • ${order['total']:.2f}</span>
                 </div>
                 """, unsafe_allow_html=True)
-        
-        # Auto-refresh for live updates
-        if current_order["status"] == "on_the_way":
-            time.sleep(2)
-            st.rerun()
-    
-    # Logout button in sidebar
-    with st.sidebar:
-        st.markdown(f"### 👤 {driver_info['name']}")
-        if st.button("🚪 Switch Driver", use_container_width=True):
-            st.session_state.driver_id = None
-            st.rerun()
 
 
 if __name__ == "__main__":

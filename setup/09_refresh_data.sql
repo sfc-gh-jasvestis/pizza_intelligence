@@ -155,45 +155,54 @@ SELECT
         WHEN 9 THEN 'STR009' WHEN 10 THEN 'STR010' WHEN 11 THEN 'STR011'
         WHEN 12 THEN 'STR012' WHEN 13 THEN 'STR013' ELSE 'STR014'
     END AS store_id,
-    'RDR' || LPAD(MOD(seq4(), 200)::STRING, 4, '0') AS rider_id,
+    'RDR' || LPAD(ABS(MOD(HASH(seq4() * 31 + 7), 200))::STRING, 4, '0') AS rider_id,
     DATEADD(day, -MOD(seq4(), 365), CURRENT_DATE()) AS delivery_date,
     DATEADD(minute, 30, DATEADD(hour, 11 + MOD(seq4() * 7, 10), 
         DATEADD(day, -MOD(seq4(), 365), CURRENT_DATE())::TIMESTAMP_NTZ)) AS promised_time,
     DATEADD(minute, 
         30 + CASE 
-            WHEN MOD(seq4(), 8) = 0 THEN 15 + MOD(seq4(), 20)
-            ELSE MOD(seq4(), 10) - 5
+            WHEN ABS(MOD(HASH(seq4() * 13 + 3), 100)) < 18 THEN 10 + ABS(MOD(HASH(seq4() * 17), 25))
+            ELSE ABS(MOD(HASH(seq4() * 11), 10)) - 5
         END,
         DATEADD(hour, 11 + MOD(seq4() * 7, 10), 
             DATEADD(day, -MOD(seq4(), 365), CURRENT_DATE())::TIMESTAMP_NTZ)
     ) AS actual_delivery_time,
     DATEADD(hour, 11 + MOD(seq4() * 7, 10), 
         DATEADD(day, -MOD(seq4(), 365), CURRENT_DATE())::TIMESTAMP_NTZ) AS prep_start_time,
-    DATEADD(minute, 15 + MOD(seq4(), 10), 
+    DATEADD(minute, 15 + ABS(MOD(HASH(seq4() * 23), 12)), 
         DATEADD(hour, 11 + MOD(seq4() * 7, 10), 
             DATEADD(day, -MOD(seq4(), 365), CURRENT_DATE())::TIMESTAMP_NTZ)) AS prep_end_time,
-    DATEADD(minute, 20 + MOD(seq4(), 5), 
+    DATEADD(minute, 18 + ABS(MOD(HASH(seq4() * 29), 8)), 
         DATEADD(hour, 11 + MOD(seq4() * 7, 10), 
             DATEADD(day, -MOD(seq4(), 365), CURRENT_DATE())::TIMESTAMP_NTZ)) AS dispatch_time,
-    2.5 + MOD(seq4(), 80) / 10.0 AS delivery_distance_km,
-    15 + MOD(seq4(), 25) AS delivery_duration_min,
-    MOD(seq4(), 8) = 0 AS is_late,
-    CASE WHEN MOD(seq4(), 8) = 0 THEN 5 + MOD(seq4(), 20) ELSE 0 END AS late_minutes,
+    1.5 + ABS(MOD(HASH(seq4() * 41), 100)) / 10.0 AS delivery_distance_km,
+    12 + ABS(MOD(HASH(seq4() * 37), 30)) AS delivery_duration_min,
+    ABS(MOD(HASH(seq4() * 13 + 3), 100)) < 18 AS is_late,
+    CASE WHEN ABS(MOD(HASH(seq4() * 13 + 3), 100)) < 18 
+         THEN 3 + ABS(MOD(HASH(seq4() * 19), 25)) ELSE 0 END AS late_minutes,
     CASE 
-        WHEN MOD(seq4(), 8) = 0 THEN 
-            CASE MOD(seq4(), 4)
+        WHEN ABS(MOD(HASH(seq4() * 13 + 3), 100)) < 18 THEN 
+            CASE ABS(MOD(HASH(seq4() * 47 + 11), 10))
                 WHEN 0 THEN 'traffic'
-                WHEN 1 THEN 'kitchen_delay'
-                WHEN 2 THEN 'rider_shortage'
-                ELSE 'weather'
+                WHEN 1 THEN 'traffic'
+                WHEN 2 THEN 'traffic'
+                WHEN 3 THEN 'kitchen_delay'
+                WHEN 4 THEN 'kitchen_delay'
+                WHEN 5 THEN 'rider_shortage'
+                WHEN 6 THEN 'weather'
+                WHEN 7 THEN 'wrong_address'
+                WHEN 8 THEN 'order_surge'
+                ELSE 'other'
             END
         ELSE NULL
     END AS late_reason,
-    3.5 + MOD(seq4(), 15) / 10.0 AS customer_rating,
-    CASE MOD(seq4(), 10)
+    2.5 + ABS(MOD(HASH(seq4() * 53), 30)) / 10.0 AS customer_rating,
+    CASE ABS(MOD(HASH(seq4() * 59), 10))
         WHEN 0 THEN 'Left at door as requested'
         WHEN 1 THEN 'Customer not available, left with neighbor'
         WHEN 2 THEN 'Delivered to office reception'
+        WHEN 3 THEN 'Handed to customer directly'
+        WHEN 4 THEN 'Contactless delivery completed'
         ELSE NULL
     END AS delivery_notes
 FROM TABLE(GENERATOR(ROWCOUNT => 20000));
@@ -552,10 +561,17 @@ WHERE order_item_id IN (
 UPDATE FACT_DELIVERIES 
 SET 
     is_late = true,
-    late_minutes = 15 + MOD(HASH(delivery_id), 20),
-    late_reason = 'traffic'
+    late_minutes = 10 + ABS(MOD(HASH(delivery_id || 'chi'), 20)),
+    late_reason = CASE ABS(MOD(HASH(delivery_id || 'reason'), 5))
+        WHEN 0 THEN 'traffic'
+        WHEN 1 THEN 'traffic'
+        WHEN 2 THEN 'kitchen_delay'
+        WHEN 3 THEN 'order_surge'
+        ELSE 'rider_shortage'
+    END
 WHERE delivery_date = CURRENT_DATE() - 1 
-  AND store_id IN ('STR004', 'STR005', 'STR006');
+  AND store_id IN ('STR004', 'STR005', 'STR006')
+  AND ABS(MOD(HASH(delivery_id), 100)) < 45;
 
 SELECT 'Chicago thin-crust decline story data created' AS status;
 

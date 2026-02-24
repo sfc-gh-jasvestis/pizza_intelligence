@@ -163,31 +163,66 @@ class AnalyticsPipeline:
         # Determine delay reason if late
         delay_reason = order.delay_reason
         if not is_on_time and not delay_reason:
-            # Infer delay reason from conditions
+            # Infer delay reason from conditions with more variety
             weather = order.weather_condition or "Clear"
             traffic = order.traffic_condition or "moderate"
+            zone = order.delivery_zone or "Loop Core"
             
-            # Check weather impact
+            # Weather-related delays
             weather_delays = {
-                "Rainy": "Rain slowed delivery",
-                "Snowy": "Snow conditions",
-                "Heavy Rain": "Heavy rain delay",
+                "Rainy": ["Rain slowed delivery", "Wet roads caution", "Visibility reduced"],
+                "Snowy": ["Snow conditions", "Icy road detour", "Snow clearing delay"],
+                "Heavy Rain": ["Heavy rain delay", "Flooded street detour", "Storm slowdown"],
             }
+            
+            # Traffic-related delays  
             traffic_delays = {
-                "heavy": "Heavy traffic",
-                "congested": "Traffic congestion",
+                "heavy": ["Heavy traffic on I-90", "Rush hour gridlock", "Accident backup on expressway", "Construction lane closure"],
+                "congested": ["Traffic congestion downtown", "Signal timing delays", "Double-parked delivery trucks"],
             }
+            
+            # Kitchen-related delays (random variety)
+            kitchen_delays = [
+                "Kitchen backup",
+                "Oven temperature issue",
+                "Large order ahead in queue",
+                "Ingredient restock delay",
+                "Peak hour kitchen rush",
+                "Staff shortage in kitchen",
+            ]
+            
+            # Driver-related delays
+            driver_delays = [
+                "Driver reassignment needed",
+                "Previous delivery ran long",
+                "Vehicle issue resolved",
+            ]
+            
+            # Zone-specific issues from config
+            from config.settings import DELIVERY_ZONES
+            zone_info = DELIVERY_ZONES.get(zone, {})
+            zone_issues = zone_info.get("common_issues", [])
+            
+            # Determine primary cause with weighted randomness
+            import random
             
             if weather in weather_delays:
-                delay_reason = weather_delays[weather]
+                delay_reason = random.choice(weather_delays[weather])
             elif traffic in traffic_delays:
-                delay_reason = traffic_delays[traffic]
-            elif order.route_distance_km > 2.0:
-                delay_reason = "Long distance"
-            elif delivery_time > prep_time:
-                delay_reason = f"{traffic.title()} traffic"
+                delay_reason = random.choice(traffic_delays[traffic])
+            elif order.route_distance_km > 2.5:
+                delay_reason = random.choice(["Long distance delivery", "Far delivery zone", "Extended route required"])
+            elif prep_time > delivery_time and random.random() < 0.7:
+                # Kitchen was the bottleneck
+                delay_reason = random.choice(kitchen_delays)
+            elif zone_issues and random.random() < 0.5:
+                # Zone-specific issue
+                delay_reason = random.choice(zone_issues)
+            elif random.random() < 0.3:
+                delay_reason = random.choice(driver_delays)
             else:
-                delay_reason = "Kitchen backup"
+                # Fallback to traffic or kitchen
+                delay_reason = random.choice(kitchen_delays + traffic_delays.get("congested", ["Traffic delay"]))
         
         # Create fact record
         fact = DeliveryFact(
@@ -229,10 +264,7 @@ class AnalyticsPipeline:
         # Mark as processed
         self._processed_orders.add(order.order_id)
         
-        on_time_emoji = "✅" if is_on_time else "⚠️"
-        print(f"📊 Analytics: {order.order_id} | {on_time_emoji} | Points: +{fact.points_earned}")
-        
-        # Notify listeners
+        # Notify listeners (silently)
         self._notify_analytics({
             "type": "delivery_processed",
             "fact": fact,
@@ -274,9 +306,8 @@ class AnalyticsPipeline:
             )
             self.db.record_loyalty_transaction(transaction)
         
-        # Log tier change
+        # Notify tier change (silently)
         if tier_changed:
-            print(f"  🎉 {customer.name} upgraded: {old_tier} → {new_tier}!")
             self._notify_analytics({
                 "type": "tier_change",
                 "customer_id": order.customer_id,

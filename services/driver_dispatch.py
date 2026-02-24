@@ -50,18 +50,14 @@ class RouteOptimizer:
                 data = response.json()
                 if data.get("routes") and len(data["routes"]) > 0:
                     coords = data["routes"][0]["geometry"]["coordinates"]
-                    print(f"🗺️ OSRM returned {len(coords)} route points")
                     # Sample every few points to reduce data while keeping shape
                     if len(coords) > 30:
                         step = max(1, len(coords) // 30)
                         coords = coords[::step] + [coords[-1]]  # Keep last point
-                        print(f"🗺️ Sampled to {len(coords)} points")
                     return coords
             
-            print(f"⚠️ OSRM failed (status {response.status_code}), using fallback")
             return RouteOptimizer._fallback_route(start_lon, start_lat, end_lon, end_lat)
         except Exception as e:
-            print(f"⚠️ OSRM error: {e}, using fallback")
             return RouteOptimizer._fallback_route(start_lon, start_lat, end_lon, end_lat)
     
     @staticmethod
@@ -285,13 +281,8 @@ class DriverDispatch:
         # Assign driver
         self.db.assign_driver(driver.driver_id, order_id)
         
-        # Check for alternate route suggestion
+        # Check for alternate route suggestion (silent)
         alt_route = self.route_optimizer.get_alternate_route(order.delivery_zone)
-        if alt_route and is_delayed:
-            print(f"  💡 Alternate route for {order.delivery_zone}: {alt_route}")
-        
-        print(f"🚗 Assigned driver {driver.name} ({driver.vehicle_type}) to {order_id}")
-        print(f"   Zone: {order.delivery_zone} | ETA: {est_time} min | Delayed: {is_delayed}")
         
         return True
     
@@ -309,7 +300,23 @@ class DriverDispatch:
             delivery_progress=0
         )
         
-        print(f"🚗 Delivery started: {order_id} by {order.driver_name}")
+        # Get zone-specific traffic info
+        zone_info = DELIVERY_ZONES.get(order.delivery_zone, {})
+        risk_level = zone_info.get("risk_level", "low")
+        alternate_route = zone_info.get("alternate_route")
+        
+        # Check time of day for traffic awareness
+        current_hour = datetime.now().hour
+        is_rush_hour = (7 <= current_hour <= 9) or (16 <= current_hour <= 19)
+        is_lunch_rush = (11 <= current_hour <= 13)
+        
+        # Build dispatch message
+        print(f"🚗 {order_id} → {order.delivery_zone} ({order.driver_name})")
+        
+        # Add traffic alert for high-risk zones during busy times
+        if risk_level == "high" and (is_rush_hour or is_lunch_rush):
+            if alternate_route:
+                print(f"   🛣️ Traffic tip: {alternate_route}")
         
         # Start delivery simulation in separate thread
         thread = threading.Thread(
@@ -381,10 +388,153 @@ class DriverDispatch:
         else:
             actual_time = order.estimated_delivery_min
         
-        # Determine if on-time
-        is_on_time = actual_time <= SIMULATION_CONFIG["promised_delivery_min"]
+        # Add dramatic variation for demo purposes
+        # Mix of outcomes: some early, some just on time, some late
+        import random
         
-        # Update order
+        scenario = random.choices(
+            ["early", "on_time", "close_call", "late", "very_late"],
+            weights=[20, 25, 20, 25, 10],  # Weighted distribution
+            k=1
+        )[0]
+        
+        promised_time = SIMULATION_CONFIG["promised_delivery_min"]
+        delay_reason = order.delay_reason
+        
+        if scenario == "early":
+            # Fast delivery - 5-10 min under promised
+            actual_time = promised_time - random.randint(5, 12)
+            delay_reason = None
+        elif scenario == "on_time":
+            # Comfortable on-time - 2-5 min under
+            actual_time = promised_time - random.randint(2, 5)
+            delay_reason = None
+        elif scenario == "close_call":
+            # Just barely on time - 0-2 min under
+            actual_time = promised_time - random.randint(0, 2)
+            delay_reason = None
+        elif scenario == "late":
+            # Late by 3-10 min
+            actual_time = promised_time + random.randint(3, 10)
+            if not delay_reason:
+                # Zone-specific delay reasons
+                zone = order.delivery_zone or "Downtown"
+                zone_delays = {
+                    "West Loop": [
+                        "Restaurant row double-parked vehicles",
+                        "Randolph St construction detour",
+                        "Event traffic near United Center",
+                        "Adams St congestion during rush",
+                    ],
+                    "Gold Coast": [
+                        "Doorman verification took extra time",
+                        "No street parking - had to circle block",
+                        "Private gate code issue",
+                        "Lake Shore Dr traffic backup",
+                    ],
+                    "Magnificent Mile": [
+                        "Michigan Ave shopping traffic gridlock",
+                        "Wrong hotel entrance - redirected",
+                        "Bus lane restrictions slowed route",
+                        "Tourist pedestrian congestion",
+                    ],
+                    "River North": [
+                        "Gallery district parking unavailable",
+                        "One-way street maze caused delay",
+                        "Bar crowd blocking Hubbard St",
+                        "Loading zone occupied",
+                    ],
+                    "Streeterville": [
+                        "Hospital area traffic congestion",
+                        "Concierge verification delay",
+                        "Northwestern campus pedestrians",
+                        "Navy Pier tourist traffic",
+                    ],
+                    "Financial District": [
+                        "LaSalle St lunch rush traffic",
+                        "Building security checkpoint delay",
+                        "Elevator wait in high-rise",
+                        "Suite number confusion",
+                    ],
+                    "Loop Core": [
+                        "State St pedestrian congestion",
+                        "CTA bus blocking lane",
+                        "High-rise elevator queue",
+                        "Lobby security verification",
+                    ],
+                    "Lakeshore East": [
+                        "Tower identification confusion",
+                        "Park detour required",
+                        "Underground parking access delay",
+                        "Harbor Dr construction",
+                    ],
+                }
+                delay_reason = random.choice(zone_delays.get(zone, [
+                    "Traffic congestion on route",
+                    "Building access delay",
+                    "Parking difficulty",
+                ]))
+        else:  # very_late
+            # Very late - 12-20 min over
+            actual_time = promised_time + random.randint(12, 20)
+            if not delay_reason:
+                # Zone-specific severe delays
+                zone = order.delivery_zone or "Downtown"
+                severe_delays = {
+                    "West Loop": [
+                        "Major backup on I-290 exit ramp",
+                        "Halsted St water main break",
+                        "Bulls/Blackhawks game traffic",
+                    ],
+                    "Gold Coast": [
+                        "Oak St completely blocked for event",
+                        "Multiple building access issues",
+                        "Rush St road closure",
+                    ],
+                    "Magnificent Mile": [
+                        "Michigan Ave parade/protest closure",
+                        "Severe shopping traffic - took 20 min",
+                        "Multiple wrong turns in traffic",
+                    ],
+                    "River North": [
+                        "Art gallery opening blocked streets",
+                        "Friday night bar crowd gridlock",
+                        "Kinzie St flooding from rain",
+                    ],
+                    "Streeterville": [
+                        "Northwestern Medical emergency traffic",
+                        "Navy Pier fireworks crowd",
+                        "Illinois St completely blocked",
+                    ],
+                    "Financial District": [
+                        "Board of Trade area gridlocked",
+                        "Multiple elevator breakdowns",
+                        "Jackson Blvd accident backup",
+                    ],
+                    "Loop Core": [
+                        "CTA service disruption traffic surge",
+                        "Multiple street closures downtown",
+                        "Washington St water main break",
+                    ],
+                    "Lakeshore East": [
+                        "Columbus Dr completely closed",
+                        "Massive park event overflow",
+                        "All towers had access issues",
+                    ],
+                }
+                delay_reason = random.choice(severe_delays.get(zone, [
+                    "Major traffic incident on route",
+                    "Severe weather causing delays",
+                    "Multiple delivery complications",
+                ]))
+        
+        # Ensure minimum sensible time
+        actual_time = max(15, actual_time)
+        
+        # Determine if on-time
+        is_on_time = actual_time <= promised_time
+        
+        # Update order with delay reason if late
         self.db.update_order(
             order_id,
             status=OrderStatus.DELIVERED,
@@ -392,14 +542,20 @@ class DriverDispatch:
             actual_delivery_min=actual_time,
             delivery_progress=100,
             is_delayed=not is_on_time,
+            delay_reason=delay_reason if not is_on_time else None,
         )
         
         # Release driver
         if order.driver_id:
             self.db.release_driver(order.driver_id)
         
+        # Compact delivery completion message
         status_emoji = "✅" if is_on_time else "⚠️"
-        print(f"{status_emoji} Delivered: {order_id} | Time: {actual_time} min | On-time: {is_on_time}")
+        time_info = f"{actual_time} min"
+        if not is_on_time and delay_reason:
+            print(f"{status_emoji} {order_id} delivered in {time_info} — {delay_reason}")
+        else:
+            print(f"{status_emoji} {order_id} delivered in {time_info}")
         
         # Clean up thread reference
         if order_id in self._delivery_threads:
@@ -422,7 +578,6 @@ class DriverDispatch:
         current_order = self.db.get_order(order_id)
         if current_order and not current_order.driver_id:
             self.assign_driver_to_order(order_id)
-            print(f"  🚗 Pre-assigned driver for {order_id} (order is {order.kitchen_progress}% done)")
     
     def _dispatch_loop(self):
         """Main loop - monitors for ready orders without drivers"""
