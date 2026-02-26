@@ -3,9 +3,9 @@
 ## Snowflake Cortex Demo for QSR Operations
 
 A comprehensive demo showcasing **Snowflake Cortex** capabilities for Quick Service Restaurant (QSR) operations, featuring:
-- **Ops Dashboard** - AI-powered operations assistant with Cortex Analyst
-- **Customer App** - Mobile-friendly ordering interface
-- **Driver App** - Real-time delivery tracking with traffic visualization
+- **Ops Dashboard** — AI Co-Pilot with Cortex Analyst, demand forecasting, anomaly detection, and live order tracking
+- **Customer App** — Mobile-friendly ordering with Party Bundle Assistant
+- **Driver App** — Real-time delivery tracking with late-delivery cheat sheets
 
 ---
 
@@ -22,7 +22,10 @@ A comprehensive demo showcasing **Snowflake Cortex** capabilities for Quick Serv
 # Connect to your Snowflake account
 snow connection test -c <your_connection>
 
-# Run setup scripts in order (01-09)
+# Run the all-in-one setup script
+snow sql -c <your_connection> -f setup/00_run_all_setup.sql
+
+# Or run setup scripts individually (01-09)
 snow sql -c <your_connection> -f setup/01_create_database.sql
 snow sql -c <your_connection> -f setup/02_create_tables.sql
 snow sql -c <your_connection> -f setup/03_load_sample_data.sql
@@ -76,15 +79,41 @@ role = "ACCOUNTADMIN"
 
 ### Step 4: Run the Apps
 
+**Option A: Docker (recommended)**
+
+```bash
+# Build and run all three apps
+docker build -f Dockerfile.ops -t pizza-ops .
+docker build -f Dockerfile.customer -t pizza-customer .
+docker build -f Dockerfile.driver -t pizza-driver .
+
+# Run with shared state volume
+mkdir -p shared_state
+docker run -d -p 8510:8501 -v $(pwd)/shared_state:/shared_state \
+  -e PIZZA_STATE_FILE=/shared_state/.pizza_unified_state.json pizza-ops
+docker run -d -p 8511:8501 -v $(pwd)/shared_state:/shared_state \
+  -e PIZZA_STATE_FILE=/shared_state/.pizza_unified_state.json pizza-customer
+docker run -d -p 8512:8501 -v $(pwd)/shared_state:/shared_state \
+  -e PIZZA_STATE_FILE=/shared_state/.pizza_unified_state.json pizza-driver
+```
+
+**Option B: Run locally**
+
 ```bash
 # Install dependencies
-pip install streamlit pydeck requests
+pip install -r requirements.txt
 
-# Run all three apps
-streamlit run pizza_ops_assistant.py --server.port 8502  # Ops Dashboard
-streamlit run driver_app.py --server.port 8503           # Driver App
-streamlit run customer_app.py --server.port 8504         # Customer App
+# Run all three apps (each in a separate terminal)
+streamlit run pizza_ops_assistant.py --server.port 8510
+streamlit run customer_app.py --server.port 8511
+streamlit run driver_app.py --server.port 8512
 ```
+
+| App | URL |
+|-----|-----|
+| Ops Dashboard | http://localhost:8510 |
+| Customer App | http://localhost:8511 |
+| Driver App | http://localhost:8512 |
 
 ---
 
@@ -94,73 +123,114 @@ streamlit run customer_app.py --server.port 8504         # Customer App
 pizza/
 ├── README.md                    # This file
 ├── DEMO_SCRIPT.md              # Step-by-step demo walkthrough
+├── requirements.txt            # Python dependencies
+│
+├── # DOCKERFILES
+├── Dockerfile.ops              # Ops Dashboard container
+├── Dockerfile.customer         # Customer App container
+├── Dockerfile.driver           # Driver App container
 │
 ├── # STREAMLIT APPS
-├── pizza_ops_assistant.py      # Ops Dashboard (port 8502)
-├── driver_app.py               # Driver delivery app (port 8503)
-├── customer_app.py             # Customer ordering app (port 8504)
-├── menu_data.py                # Shared menu data (synced with Snowflake)
-├── shared_state.py             # Cross-app state management
+├── pizza_ops_assistant.py      # Ops Dashboard + AI Co-Pilot
+├── customer_app.py             # Customer ordering app
+├── driver_app.py               # Driver delivery app
+├── menu_data.py                # Shared menu data (synced with Snowflake DIM_PRODUCTS)
+├── unified_state.py            # Cross-app state management (shared JSON file)
+├── shared_state.py             # Legacy state helpers
+├── shared_routes.py            # OSRM route fetching and caching
+│
+├── # BACKEND SERVICES (used by Ops app)
+├── services/
+│   ├── database.py             # In-memory order database
+│   ├── analytics_pipeline.py   # Delivery analytics pipeline
+│   ├── kitchen_service.py      # Kitchen simulation
+│   ├── driver_dispatch.py      # Driver assignment logic
+│   ├── order_simulator.py      # Auto-generate demo orders
+│   ├── weather_service.py      # Weather simulation
+│   └── persistence.py          # State persistence
+│
+├── config/
+│   └── settings.py             # App configuration (map colors, store config)
 │
 ├── # SNOWFLAKE SETUP
 ├── setup/
+│   ├── 00_run_all_setup.sql    # All-in-one setup runner
 │   ├── 01_create_database.sql  # Create PIZZA_INTELLIGENCE database
 │   ├── 02_create_tables.sql    # Create dimension and fact tables
-│   ├── 03_load_sample_data.sql # Load stores, products, customers
-│   ├── 04_load_orders_data.sql # Generate 50K+ orders
+│   ├── 03_load_sample_data.sql # Load stores, products, customers, campaigns
+│   ├── 04_load_orders_data.sql # Generate 50K+ orders with realistic patterns
 │   ├── 05_load_inventory_staffing.sql # Inventory and staffing data
-│   ├── 06_setup_cortex_search.sql # Configure Cortex Search service
+│   ├── 06_setup_cortex_search.sql     # Configure Cortex Search service
 │   ├── 07_create_agent.sql     # Create semantic model stage
-│   ├── 08_create_views.sql     # Create pre-joined views
-│   ├── 09_refresh_data.sql     # Refresh calendar data
-│   ├── 10_test_demo_queries.sql # Verify setup
+│   ├── 08_create_views.sql     # Create pre-joined analytics views
+│   ├── 09_refresh_data.sql     # Refresh calendar and recent data
+│   ├── 10_test_demo_queries.sql # Verify setup with test queries
 │   └── 11_add_game_day_data.sql # Optional: Add game day variations
 │
 ├── semantic_models/
 │   └── pizza_intelligence.yaml # Cortex Analyst semantic model
 │
-├── services/                   # Backend services for ops app
-│   ├── weather_service.py
-│   ├── kitchen_service.py
-│   ├── driver_dispatch.py
-│   └── database.py
-│
-├── config/
-│   └── settings.py
-│
 └── .streamlit/
-    └── secrets.toml.example    # Template for credentials
+    ├── secrets.toml.example    # Template for credentials
+    └── secrets.toml            # Your credentials (git-ignored)
 ```
 
 ---
 
 ## The Three Apps
 
-### 1. Ops Dashboard (port 8502)
-**URL:** http://localhost:8502
+### 1. Ops Dashboard (port 8510)
+**URL:** http://localhost:8510
 
-The main operations interface for store managers:
-- **Live Orders** - Real-time order tracking through kitchen → dispatch → delivery
-- **Chat Assistant** - Natural language queries via Cortex Analyst
-- **Dashboard** - Historical analytics and delivery performance
+The main operations interface for store managers, with two views:
 
-### 2. Driver App (port 8503)
-**URL:** http://localhost:8503
+**Live Orders** — Real-time order pipeline from kitchen to delivery, interactive map with driver routes, and a Capacity vs Demand chart (Altair) showing kitchen utilization over the last 7 days.
+
+**AI Co-Pilot** — Unified conversational interface combining:
+- **Quick Actions** — Shift Brief (with Kitchen Prep Checklist), Demand Forecast, Anomaly Scan
+- **Chat** — Natural language queries via Cortex Analyst + Cortex Search
+- **Suggested Questions** — Delivery performance, promo recommendations, customer feedback
+
+**Sidebar** — Live Intelligence Ticker showing thin crust capacity, kitchen utilization, and worst-store late delivery % from Snowflake.
+
+### 2. Customer App (port 8511)
+**URL:** http://localhost:8511
+
+Customer ordering interface:
+- Full menu with real food images and shopping cart
+- **Party Bundle Assistant** — Describe your event (e.g., "Game day with 8 friends") and get themed bundle suggestions with pricing
+- Order tracking with live driver location on map
+- Rating and tipping after delivery
+
+### 3. Driver App (port 8512)
+**URL:** http://localhost:8512
 
 Mobile-friendly delivery driver interface:
 - Real-time route visualization with OSRM routing
-- Traffic hotspot awareness
-- Order pickup and delivery workflow
-- ETA tracking
+- Order pickup and delivery workflow with ETA tracking
+- **Late-Delivery Cheat Sheet** — Zone-specific routing tips shown as high-contrast notification when delivery is running late
+- Delivery celebration screen on completion
 
-### 3. Customer App (port 8504)
-**URL:** http://localhost:8504
+---
 
-Customer ordering interface:
-- Menu with real food images
-- Shopping cart
-- Order tracking with live driver location
-- Rating and tipping
+## Cross-App Communication
+
+All three apps share state through a common JSON file (`.pizza_unified_state.json`). When running in Docker, this is mounted as a shared volume so orders placed in the Customer App appear in the Ops Dashboard and are assigned to drivers in the Driver App.
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `PIZZA_STATE_FILE` | Path to shared state JSON file | `.pizza_unified_state.json` (local) |
+
+---
+
+## Semantic Model
+
+The `pizza_intelligence.yaml` semantic model includes:
+- **10 tables** — orders, deliveries, stores, products, campaigns, campaign_performance, inventory, staffing, calendar, customers, kitchen_capacity, order_items
+- **Custom Instructions** — AI speaks as "Pizza Intelligence Director" with strategic tone; flags capacity < 80% as critical; applies lost-revenue formula
+- **Synonym Saturation** — Natural queries like "what dough type sells best?" or "show me recent orders" work out of the box
+- **30+ Verified Queries** — Pre-validated SQL for common questions (sales analysis, delivery performance, capacity gaps, promo recommendations)
+- **Capacity Utilization** measure — `(actual_pizzas_made / max_pizzas_per_hour) * 100`
 
 ---
 
@@ -172,19 +242,8 @@ All apps share consistent data aligned with Snowflake:
 |------|--------|-----------------|
 | Menu Items | `menu_data.py` | `DIM_PRODUCTS` |
 | Store Location | `menu_data.py` | `DIM_STORES` (Chicago Loop) |
-| Order IDs | `ORD-{5-digit}` | `FACT_ORDERS` |
+| Order IDs | `ORD-{5-digit}` sequential | `FACT_ORDERS` |
 | Drivers | `menu_data.py` | (simulated) |
-
-### Menu Items (from DIM_PRODUCTS)
-| Item | Price | Prep Time |
-|------|-------|-----------|
-| Classic Pepperoni | $18.99 | 12 min |
-| Margherita | $16.99 | 10 min |
-| BBQ Chicken | $21.99 | 14 min |
-| Veggie Garden | $17.99 | 11 min |
-| Meat Lovers | $23.99 | 15 min |
-| Hawaiian Paradise | $18.99 | 11 min |
-| Supreme Deluxe | $22.99 | 14 min |
 
 ---
 
@@ -194,17 +253,11 @@ See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the full walkthrough.
 
 ### Key Demo Questions (Cortex Analyst)
 
-1. **Capacity Analysis**
-   > "Show me the capacity gap by city for last Friday"
-
-2. **Delivery Performance**
-   > "Which stores had the highest late delivery rates last Friday?"
-
-3. **Revenue Impact**
-   > "How much revenue are we losing with kitchen capacity issues?"
-
-4. **Crisis Dashboard**
-   > "Which stores are in crisis mode right now?"
+1. **Capacity Analysis** — "Show me the capacity gap by city for last Friday"
+2. **Delivery Performance** — "Which stores had the highest late delivery rates last Friday?"
+3. **Revenue Impact** — "How much revenue are we losing with kitchen capacity issues?"
+4. **Crisis Dashboard** — "Which stores are in crisis mode right now?"
+5. **Promo Recommendations** — "Based on my sales data and feedback, which promo should I run this week?"
 
 ---
 
@@ -224,19 +277,20 @@ snow sql -c <connection> -f setup/10_test_demo_queries.sql
 2. Check warehouse is running: `snow sql -q "SELECT CURRENT_WAREHOUSE()"`
 3. Ensure user has access to PIZZA_INTELLIGENCE database
 
-### Apps Not Syncing
-1. Delete the state file: `rm .pizza_demo_state.json`
-2. Restart all three apps
-3. Create a test order in the customer app
+### Apps Not Syncing (orders not appearing across apps)
+1. Ensure all apps point to the same state file via `PIZZA_STATE_FILE`
+2. For Docker: verify the shared volume is mounted to all three containers
+3. For local: all apps should run from the same directory
+4. Delete state and restart: `rm .pizza_unified_state.json` then restart all apps
 
 ---
 
 ## Configuration
 
-### Environment Variables (Optional)
+### Environment Variables
 | Variable | Description |
 |----------|-------------|
-| `SNOWFLAKE_CONNECTION_NAME` | Connection name from `~/.snowflake/connections.toml` |
+| `PIZZA_STATE_FILE` | Path to shared state JSON file |
 | `ORS_API_KEY` | OpenRouteService API key for routing (optional) |
 
 ### Store Location
