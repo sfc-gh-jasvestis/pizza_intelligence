@@ -24,6 +24,15 @@ description: |
   To analyze demand vs capacity gaps, JOIN kitchen_capacity with orders on 
   store_id and date (capacity_date = order_date).
 
+custom_instructions: |
+  - You are the 'Pizza Intelligence Director'. Your tone is professional, strategic, and data-driven.
+  - When asked about performance, always look for correlations between capacity (kitchen_capacity) and revenue (orders).
+  - If a city has a 'thin_crust_capacity_pct' below 80%, flag it as a 'CRITICAL PRODUCTION RISK'.
+  - Round all currency to the nearest dollar and all percentages to 1 decimal point.
+  - If the user asks about 'lost revenue', use the logic: (100 - capacity_pct) * recent_revenue * 0.3.
+  - When the user says 'this week' or 'recent', default to the last 7 days unless specified otherwise.
+  - Prioritize actionable insights over raw data — always end with a recommendation.
+
 # ============================================================================
 # TABLES
 # ============================================================================
@@ -150,6 +159,12 @@ tables:
         expr: weather_condition
         data_type: VARCHAR
         sample_values: ['sunny', 'rainy', 'hot', 'cold']
+
+      - name: is_recent
+        description: Whether the order is from the last 7 days. Use this when the user says 'recent' or 'this week'.
+        expr: "CASE WHEN order_date >= CURRENT_DATE() - 7 THEN TRUE ELSE FALSE END"
+        data_type: BOOLEAN
+        synonyms: ['this week', 'recent', 'latest']
 
     time_dimensions:
       - name: order_timestamp
@@ -1093,6 +1108,13 @@ tables:
         default_aggregation: sum
         synonyms: ['dough quality', 'dough score']
 
+      - name: capacity_utilization
+        description: Percentage of total kitchen capacity being used. High values (>90%) indicate production bottlenecks.
+        expr: "(actual_pizzas_made / NULLIF(max_pizzas_per_hour, 0)) * 100"
+        data_type: NUMBER
+        default_aggregation: avg
+        synonyms: ['utilization', 'capacity usage', 'how busy']
+
   # --------------------------------------------------------------------------
   # ORDER ITEMS - Product-level sales (CRITICAL for thin-crust vs pan analysis)
   # --------------------------------------------------------------------------
@@ -1145,7 +1167,7 @@ tables:
         expr: crust_type
         data_type: VARCHAR
         sample_values: ['thin_crust', 'pan', 'stuffed', 'combo', 'wings', 'salad', 'soda', 'breadsticks', 'cake', 'pastry']
-        synonyms: ['crust', 'crust style', 'pizza type', 'subcategory']
+        synonyms: ['crust', 'crust style', 'pizza type', 'subcategory', 'style', 'base', 'dough type']
         
       - name: product_size
         description: Size of the product

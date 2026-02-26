@@ -3011,6 +3011,51 @@ Be specific and actionable. Start with a verb."""
             
             st.dataframe(df_display, use_container_width=True, hide_index=True)
 
+    # Capacity vs Demand chart (from Snowflake historical data)
+    try:
+        conn = get_snowflake_connection()
+        cap_df = conn.query("""
+            SELECT
+                capacity_date,
+                ROUND(AVG(actual_pizzas_made), 0) as actual_pizzas,
+                ROUND(AVG(max_pizzas_per_hour), 0) as max_capacity,
+                ROUND(AVG(actual_pizzas_made / NULLIF(max_pizzas_per_hour, 0)) * 100, 1) as utilization_pct
+            FROM PIZZA_INTELLIGENCE.ANALYTICS.V_KITCHEN_CAPACITY
+            WHERE store_name = 'Chicago Loop'
+              AND capacity_date >= CURRENT_DATE() - 7
+            GROUP BY capacity_date
+            ORDER BY capacity_date ASC
+        """)
+        if not cap_df.empty and len(cap_df) > 1:
+            st.markdown("---")
+            st.markdown("### 🏭 Capacity vs Demand (Last 7 Days)")
+            import altair as alt
+            cap_df["CAPACITY_DATE"] = pd.to_datetime(cap_df["CAPACITY_DATE"])
+            bars = alt.Chart(cap_df).mark_bar(color="#667eea", opacity=0.8).encode(
+                x=alt.X("CAPACITY_DATE:T", title="Date", axis=alt.Axis(format="%b %d")),
+                y=alt.Y("ACTUAL_PIZZAS:Q", title="Pizzas / Hour"),
+                color=alt.condition(
+                    alt.datum.UTILIZATION_PCT >= 90,
+                    alt.value("#FF4444"),
+                    alt.value("#667eea"),
+                ),
+                tooltip=[
+                    alt.Tooltip("CAPACITY_DATE:T", title="Date", format="%b %d"),
+                    alt.Tooltip("ACTUAL_PIZZAS:Q", title="Actual"),
+                    alt.Tooltip("MAX_CAPACITY:Q", title="Max Capacity"),
+                    alt.Tooltip("UTILIZATION_PCT:Q", title="Utilization %"),
+                ],
+            )
+            line = alt.Chart(cap_df).mark_line(color="#FF6B35", strokeWidth=3, strokeDash=[6, 3]).encode(
+                x="CAPACITY_DATE:T",
+                y=alt.Y("MAX_CAPACITY:Q"),
+                tooltip=[alt.Tooltip("MAX_CAPACITY:Q", title="Max Capacity")],
+            )
+            st.altair_chart(bars + line, use_container_width=True)
+            st.caption("Bars = actual production | Dashed line = max capacity | Red = >90% utilization (maxed out)")
+    except Exception:
+        pass
+
 
 def build_delivery_map_data(db, active_deliveries, weather=None):
     """Build data structures for the pydeck map."""
@@ -3458,6 +3503,31 @@ def _build_shift_brief_prompt() -> tuple[str, str]:
     ) or "  No driver data yet"
     late_reasons = ", ".join(snap["late_reasons"][:10]) or "None"
 
+    # Pull capacity data from Snowflake for prep context
+    capacity_context = "No capacity data available"
+    try:
+        conn = get_snowflake_connection()
+        cap_df = conn.query("""
+            SELECT
+                ROUND(AVG(thin_crust_capacity_pct), 1) as thin_cap,
+                ROUND(AVG(pan_capacity_pct), 1) as pan_cap,
+                ROUND(AVG(actual_pizzas_made), 0) as avg_made,
+                ROUND(AVG(max_pizzas_per_hour), 0) as max_cap,
+                ROUND(AVG(actual_pizzas_made / NULLIF(max_pizzas_per_hour, 0)) * 100, 1) as utilization,
+                COALESCE(LISTAGG(DISTINCT NULLIF(downtime_reason, ''), '; '), 'None') as issues
+            FROM PIZZA_INTELLIGENCE.ANALYTICS.V_KITCHEN_CAPACITY
+            WHERE store_name = 'Chicago Loop' AND capacity_date >= CURRENT_DATE() - 1
+        """)
+        if not cap_df.empty:
+            r = cap_df.iloc[0]
+            capacity_context = (
+                f"Thin crust capacity: {r['THIN_CAP']}%, Pan capacity: {r['PAN_CAP']}%, "
+                f"Avg pizzas/hr: {r['AVG_MADE']}/{r['MAX_CAP']} ({r['UTILIZATION']}% utilization), "
+                f"Equipment issues: {r['ISSUES']}"
+            )
+    except Exception:
+        pass
+
     prompt = f"""You are an AI operations analyst for Chicago Loop Pizza.
 Generate a concise shift intelligence brief for the store manager. Today is {snap['day_of_week']}, current hour: {snap['current_hour']}:00.
 
@@ -3467,6 +3537,9 @@ CURRENT STATE:
 - On-time rate: {snap['on_time_pct']}% ({snap['on_time_count']} on-time, {snap['late_count']} late)
 - Average delivery time: {snap['avg_delivery_min']} minutes
 - Total revenue: ${snap['total_revenue']:.2f} (avg order: ${snap['avg_order_value']:.2f})
+
+KITCHEN CAPACITY:
+{capacity_context}
 
 ZONE PERFORMANCE:
 {zone_lines}
@@ -3484,10 +3557,17 @@ Use 🟢 for Good, 🟡 for Warning, 🔴 for Critical.
 ### 📊 Key Metrics
 | Metric | Value | Status |
 |--------|-------|--------|
-[3-5 rows with real numbers from above]
+[3-5 rows with real numbers from above, include capacity utilization]
 
 ### ⚠️ Issues Requiring Attention
 [Bullet list of 2-3 specific issues OR "No issues detected"]
+[If thin_crust_capacity_pct < 80%, flag as CRITICAL PRODUCTION RISK]
+
+### 🍕 Kitchen Prep Checklist
+Based on current capacity and today's trends, provide 3 bullet points:
+- Dough prep quantity recommendation
+- Topping/ingredient focus areas
+- Equipment or oven action items
 
 ### ✅ Recommended Actions
 | Priority | Action | Expected Impact |
@@ -3858,12 +3938,64 @@ def main():
     # Ensure connection is established
     get_snowflake_connection()
     
-    # Sidebar with store info and demo questions
+    # Sidebar with store info, ticker, and controls
     with st.sidebar:
         st.header(":pizza: Chicago Loop")
         
         # Hardcode Chicago Loop as the store
         st.session_state.selected_store = "Chicago Loop"
+        
+        st.divider()
+        
+        # Live Intelligence Ticker
+        st.markdown("##### Live Intelligence")
+        try:
+            conn = get_snowflake_connection()
+            ticker_data = conn.query("""
+                SELECT
+                    MIN(thin_crust_capacity_pct) as min_thin_capacity,
+                    ROUND(AVG(actual_pizzas_made / NULLIF(max_pizzas_per_hour, 0)) * 100, 1) as avg_utilization
+                FROM PIZZA_INTELLIGENCE.ANALYTICS.V_KITCHEN_CAPACITY
+                WHERE capacity_date >= CURRENT_DATE() - 1
+            """)
+            late_data = conn.query("""
+                SELECT
+                    ROUND(SUM(CASE WHEN is_late THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 1) as late_pct,
+                    store_name as worst_store
+                FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
+                WHERE delivery_date >= CURRENT_DATE() - 1
+                GROUP BY store_name
+                ORDER BY late_pct DESC
+                LIMIT 1
+            """)
+            
+            if not ticker_data.empty:
+                min_cap = ticker_data.iloc[0]["MIN_THIN_CAPACITY"]
+                avg_util = ticker_data.iloc[0]["AVG_UTILIZATION"]
+                cap_danger = min_cap is not None and float(min_cap) < 80
+                st.metric(
+                    "Thin Crust Capacity",
+                    f"{min_cap:.0f}%" if min_cap is not None else "N/A",
+                    delta="CRITICAL" if cap_danger else "OK",
+                    delta_color="inverse" if cap_danger else "normal",
+                )
+                st.metric(
+                    "Kitchen Utilization",
+                    f"{avg_util:.1f}%" if avg_util is not None else "N/A",
+                )
+            
+            if not late_data.empty:
+                late_pct = late_data.iloc[0]["LATE_PCT"]
+                worst = late_data.iloc[0]["WORST_STORE"]
+                late_danger = late_pct is not None and float(late_pct) > 25
+                st.metric(
+                    f"Late % ({worst})",
+                    f"{late_pct:.1f}%" if late_pct is not None else "N/A",
+                    delta="HIGH" if late_danger else "OK",
+                    delta_color="inverse" if late_danger else "normal",
+                )
+        except Exception:
+            st.caption("_Ticker loading..._")
         
         st.divider()
         
@@ -3874,7 +4006,6 @@ def main():
         
         st.divider()
         
-        # Powered by Snowflake section
         st.markdown("""
         <div style="text-align: center; padding: 10px; opacity: 0.8;">
             <small>Powered by</small><br/>

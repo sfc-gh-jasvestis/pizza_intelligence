@@ -694,6 +694,74 @@ def render_menu_item(item, category):
             st.rerun()
 
 
+def _suggest_party_bundle(description: str) -> str:
+    """Generate a pizza bundle suggestion based on a party description using local menu data."""
+    desc_lower = description.lower()
+
+    # Estimate guest count
+    guests = 4
+    for word in desc_lower.split():
+        if word.isdigit():
+            guests = int(word)
+            break
+    for phrase, count in [("a few", 4), ("small group", 6), ("big group", 12), ("large", 15), ("huge", 20)]:
+        if phrase in desc_lower:
+            guests = count
+
+    pizzas_needed = max(2, (guests + 2) // 3)
+    is_game_day = any(w in desc_lower for w in ["game", "football", "basketball", "super bowl", "sports", "match"])
+    is_kids = any(w in desc_lower for w in ["kid", "child", "birthday", "children"])
+
+    pizzas = MENU.get("Pizzas", [])
+    sides = MENU.get("Sides", [])
+    drinks = MENU.get("Drinks", [])
+    desserts = MENU.get("Desserts", [])
+
+    if is_game_day:
+        picks = ["Meat Lovers", "Classic Pepperoni", "BBQ Chicken", "Supreme Deluxe"]
+        side_pick = "Buffalo Wings (8pc)"
+    elif is_kids:
+        picks = ["Classic Pepperoni", "Margherita", "Hawaiian Paradise"]
+        side_pick = "Garlic Breadsticks"
+    else:
+        picks = ["Classic Pepperoni", "Margherita", "BBQ Chicken", "Veggie Garden"]
+        side_pick = "Garlic Breadsticks"
+
+    selected_pizzas = []
+    for name in picks[:pizzas_needed]:
+        item = next((p for p in pizzas if p["name"] == name), None)
+        if item:
+            selected_pizzas.append(item)
+    while len(selected_pizzas) < pizzas_needed and pizzas:
+        for p in pizzas:
+            if p not in selected_pizzas:
+                selected_pizzas.append(p)
+                break
+        else:
+            break
+
+    side_item = next((s for s in sides if s["name"] == side_pick), sides[0] if sides else None)
+    drink_item = drinks[0] if drinks else None
+    dessert_item = desserts[0] if desserts and (is_kids or guests >= 8) else None
+
+    total = sum(p["price"] for p in selected_pizzas)
+    lines = [f"  - **{p['name']}** — \\${p['price']:.2f}" for p in selected_pizzas]
+    if side_item:
+        sides_qty = max(1, guests // 4)
+        total += side_item["price"] * sides_qty
+        lines.append(f"  - **{side_item['name']}** x{sides_qty} — \\${side_item['price'] * sides_qty:.2f}")
+    if drink_item:
+        drinks_qty = max(1, guests // 4)
+        total += drink_item["price"] * drinks_qty
+        lines.append(f"  - **{drink_item['name']}** x{drinks_qty} — \\${drink_item['price'] * drinks_qty:.2f}")
+    if dessert_item:
+        total += dessert_item["price"]
+        lines.append(f"  - **{dessert_item['name']}** — \\${dessert_item['price']:.2f}")
+
+    theme = "Game Day Party Pack 🏈" if is_game_day else "Kids Birthday Bundle 🎂" if is_kids else "Party Bundle 🎉"
+    return f"""**{theme}** for ~{guests} guests\n\n""" + "\n".join(lines) + f"\n\n**Bundle Total: \\${total:.2f}**"
+
+
 def render_menu_page():
     render_header()
     render_info_bar()
@@ -712,7 +780,20 @@ def render_menu_page():
             st.markdown("---")
     
     render_featured()
-    
+
+    # Party Bundle Assistant
+    with st.expander("🎉 Planning a party? Let us help!", expanded=False):
+        party_input = st.text_input(
+            "Describe your event and we'll suggest a bundle:",
+            placeholder="e.g. Game day with 8 friends, or kids birthday party for 12",
+            key="party_input",
+        )
+        if party_input:
+            suggestion = _suggest_party_bundle(party_input)
+            if suggestion:
+                st.markdown(suggestion)
+                st.caption("_Tap items below to add them to your cart._")
+
     menu_col, cart_col = st.columns([7, 2])
     
     with menu_col:

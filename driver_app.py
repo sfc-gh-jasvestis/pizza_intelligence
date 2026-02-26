@@ -444,7 +444,33 @@ def render_order_card(order, driver_info):
         delivery_progress = order.get("delivery_progress", 0)
         st.info(f"🚗 Delivery in progress... {delivery_progress}% of the way")
         st.progress(delivery_progress / 100)
-        
+
+        # Late-delivery context cheat sheet
+        eta = order.get("eta_minutes", 0)
+        created = order.get("created_at", "")
+        if created:
+            try:
+                from datetime import datetime as _dt
+                order_time = _dt.fromisoformat(created)
+                elapsed = (_dt.now() - order_time).total_seconds() / 60
+                if elapsed > 25 or (delivery_progress < 50 and elapsed > 15):
+                    zone = order.get("zone", "")
+                    zone_tips = {
+                        "River North": "Heavy foot traffic — use Wells St, avoid State St.",
+                        "West Loop": "Construction on Randolph — take Madison instead.",
+                        "Loop": "One-way streets. Use Wacker Dr for faster access.",
+                        "Streeterville": "Use back entrance on side streets off Michigan Ave.",
+                    }
+                    tip = zone_tips.get(zone, f"Check for alternate routes to {zone}.")
+                    st.markdown(f"""
+                    <div style="background: #FF6B35; padding: 14px 18px; border-radius: 10px; margin: 10px 0; border-left: 5px solid #FF4444;">
+                        <div style="font-size: 14px; font-weight: bold; color: white;">⏰ Running Late — Driver Cheat Sheet</div>
+                        <div style="color: white; font-size: 13px; margin-top: 6px;">{tip}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            except Exception:
+                pass
+
         col1, col2 = st.columns(2)
         with col1:
             if st.button("📞 Call Customer", use_container_width=True):
