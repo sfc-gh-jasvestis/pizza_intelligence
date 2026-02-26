@@ -229,14 +229,14 @@ MAP_CONFIG = {
     "refresh_interval_sec": 3,
     
     # Map style (pydeck/mapbox)
-    "style": "mapbox://styles/mapbox/dark-v10",
+    "style": "dark",
     
     # Marker colors (RGBA)
     "colors": {
-        "store": [255, 87, 51, 255],      # Pizza red
+        "store": [255, 87, 51, 255],      # Pizza red-orange
         "driver_active": [76, 175, 80, 255],   # Green
         "driver_idle": [158, 158, 158, 255],   # Gray
-        "customer": [33, 150, 243, 255],       # Blue
+        "customer": [187, 134, 252, 255],      # Purple
         "route_normal": [76, 175, 80, 180],    # Green transparent
         "route_delayed": [255, 152, 0, 180],   # Orange transparent
         "route_severe": [244, 67, 54, 180],    # Red transparent

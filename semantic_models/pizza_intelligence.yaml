@@ -1659,14 +1659,13 @@ verified_queries:
       SELECT 
         store_name,
         late_reason,
-        COUNT(*) as late_count,
-        ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) as pct_of_late
+        COUNT(*) as delay_count
       FROM PIZZA_INTELLIGENCE.ANALYTICS.V_DELIVERIES
       WHERE store_name = 'Chicago Loop'  -- Filter by store_name
         AND is_late = TRUE
         AND delivery_date >= CURRENT_DATE() - 7
       GROUP BY store_name, late_reason
-      ORDER BY late_count DESC
+      ORDER BY delay_count DESC
 
   - name: thin_crust_vs_pan_performance
     question: Compare thin-crust vs pan-pizza sales performance
@@ -1729,14 +1728,12 @@ verified_queries:
     sql: |
       SELECT 
         late_reason,
-        COUNT(*) as late_count,
-        AVG(late_minutes) as avg_minutes_late,
-        COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () as pct_of_late
+        COUNT(*) as delay_count
       FROM PIZZA_INTELLIGENCE.ANALYTICS.FACT_DELIVERIES
       WHERE is_late = true
         AND delivery_date >= CURRENT_DATE() - 30
       GROUP BY late_reason
-      ORDER BY late_count DESC
+      ORDER BY delay_count DESC
     
   - name: game_day_impact
     question: How do game days affect our sales?

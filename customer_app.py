@@ -18,7 +18,7 @@ except ImportError:
 
 from unified_state import (
     load_state, create_order, get_order, rate_order, 
-    get_all_drivers, run_simulation_step, STORE_LAT, STORE_LON
+    get_all_drivers, run_simulation_step, next_order_id, STORE_LAT, STORE_LON
 )
 from menu_data import MENU_ITEMS, DELIVERY_ZONES, STORE_NAME, DRIVERS
 
@@ -128,6 +128,11 @@ st.markdown("""
         gap: 20px;
     }
     
+    [data-testid="stHorizontalBlock"] {
+        gap: 1rem;
+        align-items: stretch;
+    }
+    
     /* Menu Card - Digital Board Style */
     .menu-card {
         background: linear-gradient(145deg, #2a2a40 0%, #1f1f35 100%);
@@ -146,44 +151,56 @@ st.markdown("""
     
     .menu-card-image {
         width: 100%;
-        height: 180px;
+        height: 140px;
         object-fit: cover;
         border-bottom: 3px solid #FF6B35;
     }
     
     .menu-card-content {
-        padding: 18px;
+        padding: 14px 16px;
     }
     
     .menu-card-header {
         display: flex;
         justify-content: space-between;
-        align-items: flex-start;
-        margin-bottom: 10px;
+        align-items: center;
+        margin-bottom: 6px;
+        gap: 8px;
     }
     
     .menu-card-name {
-        font-size: 18px;
+        font-size: 15px;
         font-weight: 700;
         color: white;
         margin: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1;
+        min-width: 0;
     }
     
     .menu-card-price {
         background: linear-gradient(135deg, #FF6B35 0%, #ff8c42 100%);
         color: white;
-        padding: 8px 16px;
+        padding: 5px 12px;
         border-radius: 20px;
         font-weight: 700;
-        font-size: 16px;
+        font-size: 14px;
         box-shadow: 0 4px 15px rgba(255,107,53,0.4);
+        white-space: nowrap;
+        flex-shrink: 0;
     }
     
     .menu-card-desc {
         color: #a0a0b0;
-        font-size: 13px;
+        font-size: 12px;
         margin: 0;
-        line-height: 1.5;
+        line-height: 1.4;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
     }
     
     /* Cart Sidebar */
@@ -622,7 +639,7 @@ def render_cart_panel():
     st.markdown("<br>", unsafe_allow_html=True)
     
     if st.button("🍕 Place Order", use_container_width=True, type="primary", disabled=cart_count == 0):
-        order_id = f"ORD-{random.randint(10000, 99999)}"
+        order_id = next_order_id()
         items_list = [f"{data['qty']}x {name}" for name, data in st.session_state.cart.items()]
         
         # Create order in unified state - driver assigned automatically at 80% kitchen progress
@@ -683,7 +700,11 @@ def render_menu_page():
     
     if st.session_state.active_order_id:
         order = get_order(st.session_state.active_order_id)
-        if order and order["status"] != "delivered":
+        if order and order["status"] == "delivered":
+            st.session_state.view = "tracking"
+            st.rerun()
+            return
+        if order and order["status"] not in ("delivered",):
             st.info(f"🚗 You have an active order: **{st.session_state.active_order_id}** - Status: **{order['status'].replace('_', ' ').title()}**")
             if st.button("📍 Track My Order", type="primary"):
                 st.session_state.view = "tracking"
@@ -692,7 +713,7 @@ def render_menu_page():
     
     render_featured()
     
-    menu_col, cart_col = st.columns([3, 1])
+    menu_col, cart_col = st.columns([7, 2])
     
     with menu_col:
         category_icons = {"Pizzas": "🍕", "Sides": "🍟", "Drinks": "🥤", "Desserts": "🍰"}
@@ -703,9 +724,9 @@ def render_menu_page():
             
             # Use container instead of nested columns
             for idx, item in enumerate(items):
-                if idx % 3 == 0:
-                    cols = st.columns(3)
-                with cols[idx % 3]:
+                if idx % 4 == 0:
+                    cols = st.columns(4)
+                with cols[idx % 4]:
                     render_menu_item(item, category)
             
             st.markdown("<br>", unsafe_allow_html=True)
@@ -827,7 +848,11 @@ def render_tracking_page():
                 </div>
                 """, unsafe_allow_html=True)
         
-        if status in ["picked_up", "on_the_way"]:
+        show_live_map = status in ["picked_up", "on_the_way"] or (
+            status in ["preparing", "ready"] and order.get("kitchen_progress", 0) >= 80 and order.get("driver_id")
+        )
+        
+        if show_live_map:
             st.markdown("<br>", unsafe_allow_html=True)
             st.markdown("### 🗺️ Live Tracking")
             
@@ -861,19 +886,26 @@ def render_tracking_page():
                     opacity=0.3,
                 ))
             
-            # Route line
-            layers.append(pdk.Layer("PathLayer", data=[{"path": route_coords, "color": [76, 175, 80, 200]}], get_path="path", get_color="color", width_scale=20, width_min_pixels=3))
+            layers.append(pdk.Layer("PathLayer", data=[{"path": route_coords, "color": [0, 122, 255, 200]}], get_path="path", get_color="color", width_scale=20, width_min_pixels=3))
             # Store marker (orange)
-            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": STORE_LAT, "lon": STORE_LON, "name": "Chicago Loop Pizza"}], get_position=["lon", "lat"], get_color=[255, 87, 51, 255], get_radius=100, pickable=True))
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": STORE_LAT, "lon": STORE_LON, "name": "Chicago Loop Pizza"}], get_position=["lon", "lat"], get_color=[255, 87, 51, 255], get_radius=40, pickable=True))
             # Driver marker (green)
-            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": driver_lat, "lon": driver_lon, "name": "Driver"}], get_position=["lon", "lat"], get_color=[52, 199, 89, 255], get_radius=80, pickable=True))
-            # Customer marker (blue)
-            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": customer_lat, "lon": customer_lon, "name": "You"}], get_position=["lon", "lat"], get_color=[33, 150, 243, 255], get_radius=80, pickable=True))
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": driver_lat, "lon": driver_lon, "name": "Driver"}], get_position=["lon", "lat"], get_color=[52, 199, 89, 255], get_radius=40, pickable=True))
+            # Customer marker (purple)
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": customer_lat, "lon": customer_lon, "name": "You"}], get_position=["lon", "lat"], get_color=[187, 134, 252, 255], get_radius=40, pickable=True))
             
-            st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=14, pitch=45), map_style="mapbox://styles/mapbox/dark-v10"), use_container_width=True)
-            st.caption("🟠 Store  •  🟢 Driver  •  🔵 Your location  •  🟢 Route  •  🔴 Traffic Zone")
+            st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=13, pitch=45, bearing=0), map_style="dark", height=450), use_container_width=True, height=450)
+            st.markdown("""
+            <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px;margin-top:8px;color:#ccc;">
+                <span><span style="color:#FF5733;">●</span> Store</span>
+                <span><span style="color:#34C759;">●</span> Driver</span>
+                <span><span style="color:#BB86FC;">●</span> Your location</span>
+                <span><span style="color:#007AFF;">●</span> Route</span>
+                <span><span style="color:#FFC107;">◉</span> Traffic Zone</span>
+            </div>
+            """, unsafe_allow_html=True)
         
-        elif status in ["pending", "preparing", "ready"]:
+        elif status in ["pending", "preparing", "ready"] and not show_live_map:
             # Show delivery route preview during preparation
             st.markdown("<br>", unsafe_allow_html=True)
             st.markdown("### 🗺️ Delivery Route")
@@ -906,15 +938,21 @@ def render_tracking_page():
                     opacity=0.3,
                 ))
             
-            # Route line (dashed style effect using lighter color)
-            layers.append(pdk.Layer("PathLayer", data=[{"path": route_coords, "color": [76, 175, 80, 120]}], get_path="path", get_color="color", width_scale=20, width_min_pixels=3))
+            layers.append(pdk.Layer("PathLayer", data=[{"path": route_coords, "color": [0, 122, 255, 120]}], get_path="path", get_color="color", width_scale=20, width_min_pixels=3))
             # Store marker (orange)
-            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": STORE_LAT, "lon": STORE_LON, "name": "Chicago Loop Pizza"}], get_position=["lon", "lat"], get_color=[255, 87, 51, 255], get_radius=100, pickable=True))
-            # Customer marker (blue)
-            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": customer_lat, "lon": customer_lon, "name": "Your Location"}], get_position=["lon", "lat"], get_color=[33, 150, 243, 255], get_radius=80, pickable=True))
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": STORE_LAT, "lon": STORE_LON, "name": "Chicago Loop Pizza"}], get_position=["lon", "lat"], get_color=[255, 87, 51, 255], get_radius=40, pickable=True))
+            # Customer marker (purple)
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": customer_lat, "lon": customer_lon, "name": "Your Location"}], get_position=["lon", "lat"], get_color=[187, 134, 252, 255], get_radius=40, pickable=True))
             
-            st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=13, pitch=45), map_style="mapbox://styles/mapbox/dark-v10"), use_container_width=True)
-            st.caption("🟠 Store  •  🔵 Your location  •  🟢 Planned Route  •  🔴 Traffic Zone")
+            st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=13, pitch=45, bearing=0), map_style="dark", height=450), use_container_width=True, height=450)
+            st.markdown("""
+            <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px;margin-top:8px;color:#ccc;">
+                <span><span style="color:#FF5733;">●</span> Store</span>
+                <span><span style="color:#BB86FC;">●</span> Your location</span>
+                <span><span style="color:#007AFF;">●</span> Planned Route</span>
+                <span><span style="color:#FFC107;">◉</span> Traffic Zone</span>
+            </div>
+            """, unsafe_allow_html=True)
     
     with col2:
         st.markdown("### 📦 Order Details")

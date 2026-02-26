@@ -17,7 +17,10 @@ try:
 except ImportError:
     ROUTES_AVAILABLE = False
 
-STATE_FILE = os.path.join(os.path.dirname(__file__), ".pizza_unified_state.json")
+STATE_FILE = os.environ.get(
+    "PIZZA_STATE_FILE",
+    os.path.join(os.path.dirname(__file__), ".pizza_unified_state.json"),
+)
 _lock = threading.Lock()
 
 # Store location
@@ -37,8 +40,46 @@ def get_default_state():
     return {
         "orders": {},
         "drivers": {k: {**v, "deliveries_today": 0, "tips_today": 0, "current_order": None} for k, v in DEFAULT_DRIVERS.items()},
+        "last_assigned_driver_idx": -1,
+        "order_counter": 0,
         "last_updated": datetime.now().isoformat()
     }
+
+
+def next_order_id() -> str:
+    """Generate the next sequential order ID (ORD-00001, ORD-00002, ...)."""
+    with _lock:
+        try:
+            if os.path.exists(STATE_FILE):
+                with open(STATE_FILE, 'r') as f:
+                    state = json.load(f)
+            else:
+                state = get_default_state()
+        except Exception:
+            state = get_default_state()
+        counter = state.get("order_counter", 0) + 1
+        state["order_counter"] = counter
+        state["last_updated"] = datetime.now().isoformat()
+        try:
+            with open(STATE_FILE, 'w') as f:
+                json.dump(state, f, indent=2, default=str)
+        except Exception as e:
+            print(f"Error saving state: {e}")
+        return f"ORD-{counter:05d}"
+
+def _pick_next_driver(state):
+    driver_ids = sorted(state["drivers"].keys())
+    available = [d for d in driver_ids if not state["drivers"][d].get("current_order")]
+    if not available:
+        return None
+    last_idx = state.get("last_assigned_driver_idx", -1)
+    for i in range(1, len(driver_ids) + 1):
+        candidate_idx = (last_idx + i) % len(driver_ids)
+        candidate = driver_ids[candidate_idx]
+        if candidate in available:
+            state["last_assigned_driver_idx"] = candidate_idx
+            return candidate
+    return available[0]
 
 def load_state() -> dict:
     with _lock:
@@ -154,10 +195,8 @@ def advance_kitchen(order_id: str, increment: int = 10):
         
         # At 80%, auto-assign driver if not assigned
         if order["kitchen_progress"] >= 80 and not order["driver_id"]:
-            available_drivers = [d_id for d_id, d in state["drivers"].items() 
-                               if not d.get("current_order")]
-            if available_drivers:
-                driver_id = random.choice(available_drivers)
+            driver_id = _pick_next_driver(state)
+            if driver_id:
                 order["driver_id"] = driver_id
                 state["drivers"][driver_id]["current_order"] = order_id
         
@@ -267,9 +306,9 @@ def reset_state():
 def run_simulation_step():
     """Run one step of simulation - advance all orders automatically.
     
-    Designed for ~5 second intervals:
-    - Kitchen: +5% per step = ~20 steps to complete = ~100 seconds
-    - Delivery: +8% per step = ~13 steps to complete = ~65 seconds
+    Designed for ~3 second intervals across multiple apps:
+    - Kitchen: +3% per step = ~34 steps to complete = ~100 seconds
+    - Delivery: +4% per step = ~25 steps to complete = ~75 seconds
     """
     state = load_state()
     changed = False
@@ -277,17 +316,16 @@ def run_simulation_step():
     for order_id, order in state["orders"].items():
         if order["status"] == "pending":
             order["status"] = "preparing"
-            order["kitchen_progress"] = 5
+            order["kitchen_progress"] = 3
             changed = True
         
         elif order["status"] == "preparing" and order["kitchen_progress"] < 100:
-            order["kitchen_progress"] = min(100, order["kitchen_progress"] + 5)
+            order["kitchen_progress"] = min(100, order["kitchen_progress"] + 3)
             
             # Auto-assign driver at 80%
             if order["kitchen_progress"] >= 80 and not order["driver_id"]:
-                available = [d for d, info in state["drivers"].items() if not info.get("current_order")]
-                if available:
-                    driver_id = random.choice(available)
+                driver_id = _pick_next_driver(state)
+                if driver_id:
                     order["driver_id"] = driver_id
                     state["drivers"][driver_id]["current_order"] = order_id
             
@@ -303,11 +341,11 @@ def run_simulation_step():
         
         elif order["status"] == "picked_up":
             order["status"] = "on_the_way"
-            order["delivery_progress"] = 5
+            order["delivery_progress"] = 4
             changed = True
         
         elif order["status"] == "on_the_way" and order["delivery_progress"] < 100:
-            order["delivery_progress"] = min(100, order["delivery_progress"] + 8)
+            order["delivery_progress"] = min(100, order["delivery_progress"] + 4)
             progress = order["delivery_progress"] / 100.0
             
             # Fetch or use cached route, then interpolate driver position

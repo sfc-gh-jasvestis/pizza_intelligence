@@ -88,54 +88,76 @@ INSERT INTO FACT_ORDERS
 WITH order_gen AS (
     SELECT 
         seq4() AS row_num,
-        DATEADD(day, -MOD(seq4(), 365), CURRENT_DATE()) AS order_date
+        DATEADD(day, -ABS(MOD(HASH(seq4() * 73 + 19), 365)), CURRENT_DATE()) AS order_date
     FROM TABLE(GENERATOR(ROWCOUNT => 60000))
+),
+order_base AS (
+    SELECT
+        row_num,
+        order_date,
+        DAYOFWEEK(order_date) AS dow,
+        CASE MOD(row_num, 15)
+            WHEN 0 THEN 'STR001' WHEN 1 THEN 'STR002' WHEN 2 THEN 'STR003'
+            WHEN 3 THEN 'STR004' WHEN 4 THEN 'STR004' WHEN 5 THEN 'STR005'
+            WHEN 6 THEN 'STR006' WHEN 7 THEN 'STR007' WHEN 8 THEN 'STR008'
+            WHEN 9 THEN 'STR009' WHEN 10 THEN 'STR010' WHEN 11 THEN 'STR011'
+            WHEN 12 THEN 'STR012' WHEN 13 THEN 'STR013' ELSE 'STR014'
+        END AS store_id,
+        CASE 
+            WHEN DAYOFWEEK(order_date) IN (5, 6) THEN 1.20
+            WHEN DAYOFWEEK(order_date) = 0 THEN 1.10
+            WHEN DAYOFWEEK(order_date) IN (1, 2) THEN 0.85
+            WHEN DAYOFWEEK(order_date) = 3 THEN 0.92
+            ELSE 1.00
+        END AS dow_multiplier,
+        20.00 + ABS(MOD(HASH(row_num * 67 + 13), 80)) AS base_subtotal
+    FROM order_gen
 )
 SELECT 
     'ORD' || LPAD(row_num::STRING, 8, '0') AS order_id,
     order_date,
-    DATEADD(hour, 10 + MOD(row_num * 7, 12), order_date::TIMESTAMP_NTZ) AS order_timestamp,
-    CASE MOD(row_num, 15)
-        WHEN 0 THEN 'STR001' WHEN 1 THEN 'STR002' WHEN 2 THEN 'STR003'
-        WHEN 3 THEN 'STR004' WHEN 4 THEN 'STR004' WHEN 5 THEN 'STR005'
-        WHEN 6 THEN 'STR006' WHEN 7 THEN 'STR007' WHEN 8 THEN 'STR008'
-        WHEN 9 THEN 'STR009' WHEN 10 THEN 'STR010' WHEN 11 THEN 'STR011'
-        WHEN 12 THEN 'STR012' WHEN 13 THEN 'STR013' ELSE 'STR014'
-    END AS store_id,
-    'CUST' || LPAD(MOD(row_num * 17, 500)::STRING, 6, '0') AS customer_id,
+    DATEADD(hour, 10 + ABS(MOD(HASH(row_num * 43 + 9), 12)), order_date::TIMESTAMP_NTZ) AS order_timestamp,
+    store_id,
+    'CUST' || LPAD(ABS(MOD(HASH(row_num * 71 + 3), 500))::STRING, 6, '0') AS customer_id,
     CASE 
-        WHEN MOD(row_num, 5) = 0 THEN 'CMP00' || (MOD(row_num, 10) + 1)::STRING
+        WHEN ABS(MOD(HASH(row_num * 83 + 17), 5)) = 0 THEN 'CMP00' || (ABS(MOD(HASH(row_num * 89), 10)) + 1)::STRING
         ELSE NULL 
     END AS campaign_id,
-    CASE MOD(row_num, 5)
+    CASE ABS(MOD(HASH(row_num * 97 + 23), 5))
         WHEN 0 THEN 'app'
         WHEN 1 THEN 'web'
         WHEN 2 THEN 'phone'
         WHEN 3 THEN 'in_store'
         ELSE 'third_party'
     END AS order_channel,
-    CASE MOD(row_num, 3)
+    CASE ABS(MOD(HASH(row_num * 101 + 29), 3))
         WHEN 0 THEN 'delivery'
         WHEN 1 THEN 'pickup'
         ELSE 'dine_in'
     END AS order_type,
-    25.00 + MOD(row_num * 13, 75) AS subtotal,
-    CASE WHEN MOD(row_num, 5) = 0 THEN 3.00 + MOD(row_num, 8) ELSE 0 END AS discount_amount,
-    (25.00 + MOD(row_num * 13, 75)) * 0.08 AS tax_amount,
-    CASE WHEN MOD(row_num, 3) = 0 THEN 4.99 ELSE 0 END AS delivery_fee,
-    CASE WHEN MOD(row_num, 3) = 0 THEN MOD(row_num, 8) + 2 ELSE 0 END AS tip_amount,
-    (25.00 + MOD(row_num * 13, 75)) * 1.08 
-        + CASE WHEN MOD(row_num, 3) = 0 THEN 4.99 + MOD(row_num, 8) + 2 ELSE 0 END
-        - CASE WHEN MOD(row_num, 5) = 0 THEN 3.00 + MOD(row_num, 8) ELSE 0 END AS total_amount,
-    MOD(row_num, 5) + 1 AS item_count,
-    MOD(row_num, 20) = 0 AS is_first_order,
-    CASE MOD(row_num, 4)
+    ROUND(base_subtotal * dow_multiplier, 2) AS subtotal,
+    CASE WHEN ABS(MOD(HASH(row_num * 107 + 31), 5)) = 0 
+         THEN ROUND(2.00 + ABS(MOD(HASH(row_num * 109), 10)), 2) ELSE 0 END AS discount_amount,
+    ROUND(base_subtotal * dow_multiplier * 0.08, 2) AS tax_amount,
+    CASE WHEN ABS(MOD(HASH(row_num * 101 + 29), 3)) = 0 THEN 4.99 ELSE 0 END AS delivery_fee,
+    CASE WHEN ABS(MOD(HASH(row_num * 101 + 29), 3)) = 0 
+         THEN ROUND(2.00 + ABS(MOD(HASH(row_num * 113 + 37), 10)), 2) ELSE 0 END AS tip_amount,
+    ROUND(
+        base_subtotal * dow_multiplier * 1.08 
+        + CASE WHEN ABS(MOD(HASH(row_num * 101 + 29), 3)) = 0 
+               THEN 4.99 + 2.00 + ABS(MOD(HASH(row_num * 113 + 37), 10)) ELSE 0 END
+        - CASE WHEN ABS(MOD(HASH(row_num * 107 + 31), 5)) = 0 
+               THEN 2.00 + ABS(MOD(HASH(row_num * 109), 10)) ELSE 0 END
+    , 2) AS total_amount,
+    ABS(MOD(HASH(row_num * 127 + 41), 5)) + 1 AS item_count,
+    ABS(MOD(HASH(row_num * 131), 20)) = 0 AS is_first_order,
+    CASE ABS(MOD(HASH(row_num * 137 + 47), 4))
         WHEN 0 THEN 'credit_card'
         WHEN 1 THEN 'debit_card'
         WHEN 2 THEN 'apple_pay'
         ELSE 'cash'
     END AS payment_method
-FROM order_gen;
+FROM order_base;
 
 SELECT 'Orders refreshed: ' || COUNT(*) || ' orders' AS status FROM FACT_ORDERS;
 
@@ -145,44 +167,57 @@ SELECT 'Orders refreshed: ' || COUNT(*) || ' orders' AS status FROM FACT_ORDERS;
 TRUNCATE TABLE FACT_DELIVERIES;
 
 INSERT INTO FACT_DELIVERIES
+WITH del_gen AS (
+    SELECT
+        seq4() AS rn,
+        CASE MOD(seq4(), 15)
+            WHEN 0 THEN 'STR001' WHEN 1 THEN 'STR002' WHEN 2 THEN 'STR003'
+            WHEN 3 THEN 'STR004' WHEN 4 THEN 'STR004' WHEN 5 THEN 'STR005'
+            WHEN 6 THEN 'STR006' WHEN 7 THEN 'STR007' WHEN 8 THEN 'STR008'
+            WHEN 9 THEN 'STR009' WHEN 10 THEN 'STR010' WHEN 11 THEN 'STR011'
+            WHEN 12 THEN 'STR012' WHEN 13 THEN 'STR013' ELSE 'STR014'
+        END AS store_id,
+        CASE 
+            WHEN MOD(seq4(), 15) IN (0, 1, 2) THEN 8
+            WHEN MOD(seq4(), 15) IN (3, 4, 5) THEN 3
+            WHEN MOD(seq4(), 15) IN (6, 7, 8) THEN -2
+            WHEN MOD(seq4(), 15) IN (9, 10, 11) THEN 5
+            ELSE 0
+        END AS region_offset
+    FROM TABLE(GENERATOR(ROWCOUNT => 20000))
+)
 SELECT 
-    'DEL' || LPAD(seq4()::STRING, 8, '0') AS delivery_id,
-    'ORD' || LPAD((seq4() * 3)::STRING, 8, '0') AS order_id,
-    CASE MOD(seq4(), 15)
-        WHEN 0 THEN 'STR001' WHEN 1 THEN 'STR002' WHEN 2 THEN 'STR003'
-        WHEN 3 THEN 'STR004' WHEN 4 THEN 'STR004' WHEN 5 THEN 'STR005'
-        WHEN 6 THEN 'STR006' WHEN 7 THEN 'STR007' WHEN 8 THEN 'STR008'
-        WHEN 9 THEN 'STR009' WHEN 10 THEN 'STR010' WHEN 11 THEN 'STR011'
-        WHEN 12 THEN 'STR012' WHEN 13 THEN 'STR013' ELSE 'STR014'
-    END AS store_id,
-    'RDR' || LPAD(ABS(MOD(HASH(seq4() * 31 + 7), 200))::STRING, 4, '0') AS rider_id,
-    DATEADD(day, -MOD(seq4(), 365), CURRENT_DATE()) AS delivery_date,
-    DATEADD(minute, 30, DATEADD(hour, 11 + MOD(seq4() * 7, 10), 
-        DATEADD(day, -MOD(seq4(), 365), CURRENT_DATE())::TIMESTAMP_NTZ)) AS promised_time,
+    'DEL' || LPAD(rn::STRING, 8, '0') AS delivery_id,
+    'ORD' || LPAD((rn * 3)::STRING, 8, '0') AS order_id,
+    store_id,
+    'DRV' || LPAD((ABS(MOD(HASH(rn * 31 + 7), 5)) + 1)::STRING, 3, '0') AS rider_id,
+    DATEADD(day, -ABS(MOD(HASH(rn * 59 + 11), 365)), CURRENT_DATE()) AS delivery_date,
+    DATEADD(minute, 30, DATEADD(hour, 11 + MOD(rn * 7, 10), 
+        DATEADD(day, -ABS(MOD(HASH(rn * 59 + 11), 365)), CURRENT_DATE())::TIMESTAMP_NTZ)) AS promised_time,
     DATEADD(minute, 
         30 + CASE 
-            WHEN ABS(MOD(HASH(seq4() * 13 + 3), 100)) < 18 THEN 10 + ABS(MOD(HASH(seq4() * 17), 25))
-            ELSE ABS(MOD(HASH(seq4() * 11), 10)) - 5
+            WHEN ABS(MOD(HASH(rn * 13 + 3), 100)) < 18 THEN 10 + ABS(MOD(HASH(rn * 17), 25))
+            ELSE ABS(MOD(HASH(rn * 11), 10)) - 5
         END,
-        DATEADD(hour, 11 + MOD(seq4() * 7, 10), 
-            DATEADD(day, -MOD(seq4(), 365), CURRENT_DATE())::TIMESTAMP_NTZ)
+        DATEADD(hour, 11 + MOD(rn * 7, 10), 
+            DATEADD(day, -ABS(MOD(HASH(rn * 59 + 11), 365)), CURRENT_DATE())::TIMESTAMP_NTZ)
     ) AS actual_delivery_time,
-    DATEADD(hour, 11 + MOD(seq4() * 7, 10), 
-        DATEADD(day, -MOD(seq4(), 365), CURRENT_DATE())::TIMESTAMP_NTZ) AS prep_start_time,
-    DATEADD(minute, 15 + ABS(MOD(HASH(seq4() * 23), 12)), 
-        DATEADD(hour, 11 + MOD(seq4() * 7, 10), 
-            DATEADD(day, -MOD(seq4(), 365), CURRENT_DATE())::TIMESTAMP_NTZ)) AS prep_end_time,
-    DATEADD(minute, 18 + ABS(MOD(HASH(seq4() * 29), 8)), 
-        DATEADD(hour, 11 + MOD(seq4() * 7, 10), 
-            DATEADD(day, -MOD(seq4(), 365), CURRENT_DATE())::TIMESTAMP_NTZ)) AS dispatch_time,
-    1.5 + ABS(MOD(HASH(seq4() * 41), 100)) / 10.0 AS delivery_distance_km,
-    12 + ABS(MOD(HASH(seq4() * 37), 30)) AS delivery_duration_min,
-    ABS(MOD(HASH(seq4() * 13 + 3), 100)) < 18 AS is_late,
-    CASE WHEN ABS(MOD(HASH(seq4() * 13 + 3), 100)) < 18 
-         THEN 3 + ABS(MOD(HASH(seq4() * 19), 25)) ELSE 0 END AS late_minutes,
+    DATEADD(hour, 11 + MOD(rn * 7, 10), 
+        DATEADD(day, -ABS(MOD(HASH(rn * 59 + 11), 365)), CURRENT_DATE())::TIMESTAMP_NTZ) AS prep_start_time,
+    DATEADD(minute, 15 + ABS(MOD(HASH(rn * 23), 12)), 
+        DATEADD(hour, 11 + MOD(rn * 7, 10), 
+            DATEADD(day, -ABS(MOD(HASH(rn * 59 + 11), 365)), CURRENT_DATE())::TIMESTAMP_NTZ)) AS prep_end_time,
+    DATEADD(minute, 18 + ABS(MOD(HASH(rn * 29), 8)), 
+        DATEADD(hour, 11 + MOD(rn * 7, 10), 
+            DATEADD(day, -ABS(MOD(HASH(rn * 59 + 11), 365)), CURRENT_DATE())::TIMESTAMP_NTZ)) AS dispatch_time,
+    1.5 + ABS(MOD(HASH(rn * 41), 100)) / 10.0 AS delivery_distance_km,
+    GREATEST(8, region_offset + 15 + ABS(MOD(HASH(rn * 37), 20))) AS delivery_duration_min,
+    ABS(MOD(HASH(rn * 13 + 3), 100)) < 18 AS is_late,
+    CASE WHEN ABS(MOD(HASH(rn * 13 + 3), 100)) < 18 
+         THEN 3 + ABS(MOD(HASH(rn * 19), 25)) ELSE 0 END AS late_minutes,
     CASE 
-        WHEN ABS(MOD(HASH(seq4() * 13 + 3), 100)) < 18 THEN 
-            CASE ABS(MOD(HASH(seq4() * 47 + 11), 10))
+        WHEN ABS(MOD(HASH(rn * 13 + 3), 100)) < 18 THEN 
+            CASE ABS(MOD(HASH(rn * 47 + 11), 10))
                 WHEN 0 THEN 'traffic'
                 WHEN 1 THEN 'traffic'
                 WHEN 2 THEN 'traffic'
@@ -196,8 +231,8 @@ SELECT
             END
         ELSE NULL
     END AS late_reason,
-    2.5 + ABS(MOD(HASH(seq4() * 53), 30)) / 10.0 AS customer_rating,
-    CASE ABS(MOD(HASH(seq4() * 59), 10))
+    2.5 + ABS(MOD(HASH(rn * 53), 30)) / 10.0 AS customer_rating,
+    CASE ABS(MOD(HASH(rn * 59), 10))
         WHEN 0 THEN 'Left at door as requested'
         WHEN 1 THEN 'Customer not available, left with neighbor'
         WHEN 2 THEN 'Delivered to office reception'
@@ -205,7 +240,7 @@ SELECT
         WHEN 4 THEN 'Contactless delivery completed'
         ELSE NULL
     END AS delivery_notes
-FROM TABLE(GENERATOR(ROWCOUNT => 20000));
+FROM del_gen;
 
 SELECT 'Deliveries refreshed: ' || COUNT(*) || ' deliveries' AS status FROM FACT_DELIVERIES;
 

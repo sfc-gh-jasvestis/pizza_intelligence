@@ -164,6 +164,12 @@ if "simulation_active" not in st.session_state:
     st.session_state.simulation_active = False
 if "last_refresh" not in st.session_state:
     st.session_state.last_refresh = 0
+if "last_active_order" not in st.session_state:
+    st.session_state.last_active_order = None
+if "celebrating_delivery" not in st.session_state:
+    st.session_state.celebrating_delivery = False
+if "celebration_count" not in st.session_state:
+    st.session_state.celebration_count = 0
 
 
 def simulate_driver_movement(order):
@@ -250,27 +256,11 @@ def render_order_map(order):
         layers.append(traffic_layer)
     
     # Route line following actual roads
-    route_color = [76, 175, 80, 200]  # Green for normal
-    
-    # Check if route passes through traffic zones
-    route_has_traffic = False
-    for coord in route_coords[::max(1, len(route_coords)//10)]:
-        for hotspot in active_hotspots:
-            dlat = (coord[1] - hotspot["lat"]) * 111
-            dlon = (coord[0] - hotspot["lon"]) * 85
-            dist_km = (dlat**2 + dlon**2) ** 0.5
-            if dist_km < 0.3:
-                route_has_traffic = True
-                route_color = [255, 152, 0, 200]  # Orange for traffic
-                break
-        if route_has_traffic:
-            break
-    
     route_layer = pdk.Layer(
         "PathLayer",
         data=[{
             "path": route_coords,
-            "color": route_color,
+            "color": [0, 122, 255, 200],
             "name": f"Route to {order.get('customer_name', 'Customer')}",
             "reason": f"Order {order['order_id']}",
         }],
@@ -289,7 +279,7 @@ def render_order_map(order):
         "lat": STORE_LAT,
         "lon": STORE_LON,
         "color": [255, 87, 51, 255],
-        "size": 100,
+        "size": 40,
     }]
     store_layer = pdk.Layer(
         "ScatterplotLayer",
@@ -301,14 +291,14 @@ def render_order_map(order):
     )
     layers.append(store_layer)
     
-    # Customer marker (blue)
+    # Customer marker (purple)
     customer_data = [{
         "name": order.get("customer_name", "Customer"),
         "reason": order.get("address", "Delivery destination"),
         "lat": customer_lat,
         "lon": customer_lon,
-        "color": [33, 150, 243, 255],
-        "size": 80,
+        "color": [187, 134, 252, 255],
+        "size": 40,
     }]
     customer_layer = pdk.Layer(
         "ScatterplotLayer",
@@ -328,7 +318,7 @@ def render_order_map(order):
             "lat": driver_lat,
             "lon": driver_lon,
             "color": [52, 199, 89, 255],
-            "size": 90,
+            "size": 40,
         }]
         driver_layer = pdk.Layer(
             "ScatterplotLayer",
@@ -351,31 +341,26 @@ def render_order_map(order):
     deck = pdk.Deck(
         layers=layers,
         initial_view_state=view_state,
-        map_style="mapbox://styles/mapbox/dark-v10",
+        map_style="dark",
         tooltip={
             "html": "<b>{name}</b><br/>{reason}",
             "style": {"backgroundColor": "steelblue", "color": "white"}
         },
-        height=400,
+        height=450,
     )
     
-    st.pydeck_chart(deck, use_container_width=True, height=400)
+    st.pydeck_chart(deck, use_container_width=True, height=450)
     
-    # Legend
+    # Legend with inline HTML dots matching actual RGBA values
     st.markdown("""
-    <div style="display: flex; flex-wrap: wrap; gap: 15px; font-size: 12px; margin-top: 8px; color: #aaa;">
-        <span>🟠 Store</span>
-        <span>🔵 Customer</span>
-        <span>🟢 You</span>
-        <span style="color: #f44336;">● Traffic Zone</span>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px;margin-top:8px;color:#ccc;">
+        <span><span style="color:#FF5733;">●</span> Store</span>
+        <span><span style="color:#BB86FC;">●</span> Customer</span>
+        <span><span style="color:#34C759;">●</span> You</span>
+        <span><span style="color:#007AFF;">●</span> Route</span>
+        <span><span style="color:#FFC107;">◉</span> Traffic Zone</span>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Traffic alert if route affected
-    if route_has_traffic:
-        zone_info = DELIVERY_ZONES.get(order_zone, {})
-        alt_route = zone_info.get("alternate_route", "Consider side streets")
-        st.warning(f"⚠️ **Traffic Alert:** Route passes through congestion. {alt_route}")
 
 
 def render_order_card(order, driver_info):
@@ -557,41 +542,57 @@ def render_delivery_history(driver_id):
 
 
 def main():
-    # Check if any driver has an active order - auto-select for demo
     state = load_state()
     drivers = state.get("drivers", {})
-    
-    # Find driver with active order
+
+    # --- Celebration screen (shown for a few refresh cycles after delivery) ---
+    if st.session_state.celebrating_delivery:
+        st.session_state.celebration_count += 1
+        delivered_order = state.get("orders", {}).get(st.session_state.last_active_order or "", {})
+        customer_name = delivered_order.get("customer_name", "the customer")
+        tip = delivered_order.get("tip")
+        tip_html = f'<p style="color: #4CAF50; font-size: 20px; font-weight: bold;">Tip: ${tip:.2f}</p>' if tip else ""
+        st.markdown(f"""
+        <div style="text-align: center; padding: 80px 20px;">
+            <div style="font-size: 100px;">🎉</div>
+            <h2 style="color: #4CAF50;">Delivery Complete!</h2>
+            <p style="color: #aaa; font-size: 16px;">Great job delivering to {customer_name}!</p>
+            {tip_html}
+            <p style="color: #666; font-size: 13px;">Returning to driver list...</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.session_state.celebration_count >= 3:
+            st.session_state.celebrating_delivery = False
+            st.session_state.celebration_count = 0
+            st.session_state.last_active_order = None
+            st.session_state.driver_id = None
+            st.rerun()
+        return
+
+    # --- Detect delivery completion via session state tracking ---
+    if st.session_state.driver_id and st.session_state.last_active_order:
+        order = state.get("orders", {}).get(st.session_state.last_active_order, {})
+        if order.get("status") == "delivered":
+            st.session_state.celebrating_delivery = True
+            st.session_state.celebration_count = 0
+            st.rerun()
+            return
+
+    # Track the current active order for this driver
+    if st.session_state.driver_id:
+        driver_data = drivers.get(st.session_state.driver_id, {})
+        if driver_data.get("current_order"):
+            st.session_state.last_active_order = driver_data["current_order"]
+
+    # Find driver with active order - auto-select for demo
     active_driver = None
     for driver_id, driver in drivers.items():
         if driver.get("current_order"):
             active_driver = driver_id
             break
-    
-    # Auto-select driver with active order for seamless demo
+
     if active_driver and not st.session_state.driver_id:
         st.session_state.driver_id = active_driver
-    
-    # Check if currently selected driver's order was delivered - auto-reset
-    if st.session_state.driver_id:
-        driver_data = drivers.get(st.session_state.driver_id, {})
-        current_order_id = driver_data.get("current_order")
-        
-        if current_order_id:
-            # Driver has active order - check if it just became delivered
-            order = state.get("orders", {}).get(current_order_id, {})
-            if order.get("status") == "delivered":
-                st.markdown("""
-                <div style="text-align: center; padding: 100px 20px;">
-                    <div style="font-size: 80px;">🎉</div>
-                    <h2 style="color: #4CAF50;">Delivery Complete!</h2>
-                    <p style="color: #aaa;">Great job! Returning to driver list...</p>
-                </div>
-                """, unsafe_allow_html=True)
-                time.sleep(2)
-                st.session_state.driver_id = None
-                st.rerun()
-                return
     
     # Driver selection screen
     if not st.session_state.driver_id:

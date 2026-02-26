@@ -17,7 +17,10 @@ except ImportError:
     DRIVERS = None
 
 # Shared state file path
-STATE_FILE = os.path.join(os.path.dirname(__file__), ".pizza_demo_state.json")
+STATE_FILE = os.environ.get(
+    "PIZZA_STATE_FILE",
+    os.path.join(os.path.dirname(__file__), ".pizza_demo_state.json"),
+)
 
 def get_default_state():
     """Return default state structure."""
@@ -245,7 +248,11 @@ def create_demo_order():
     items = random.choice(items_options)
     total = random.uniform(28, 65)
     
-    order_id = f"ORD-{random.randint(10000, 99999)}"
+    state = load_state()
+    counter = state.get("order_counter", 0) + 1
+    state["order_counter"] = counter
+    save_state(state)
+    order_id = f"ORD-{counter:05d}"
     
     order = create_order(
         order_id=order_id,

@@ -102,36 +102,49 @@ DEMO_QUESTIONS = [
         "question": "Why were my sales lower than usual last week? What's causing the drop and what promo would help?",
         "icon": "trending_down",
         "color": "red",
-        "type": "both"  # Sales data + customer feedback + promo suggestion
+        "type": "both"
     },
     {
         "label": "Friday night forecast",
         "question": "What should we expect next Friday night? There's a football game nearby. Give me demand forecast and staffing recommendations.",
         "icon": "sports_football",
         "color": "blue",
-        "type": "both"  # Football game + weather + history → staffing & demand forecast
+        "type": "both"
     },
     {
         "label": "Delivery performance",
         "question": "Show me my delivery performance by week for the last month",
         "icon": "local_shipping",
         "color": "orange",
-        "type": "analyst"  # Pure metrics/charts demo
+        "type": "analyst"
     },
     {
         "label": "Top fixes this week",
         "question": "What are the top things I should fix this week to improve operations?",
         "icon": "build",
         "color": "violet",
-        "type": "both"  # Performance metrics + audit documents
+        "type": "both"
     },
     {
         "label": "Customer feedback",
         "question": "What are customers saying about us? Show me recent reviews - both the happy ones and complaints.",
         "icon": "sentiment_satisfied",
         "color": "green",
-        "type": "search"  # Pure document search demo
+        "type": "search"
     },
+    {
+        "label": "Which promo to run?",
+        "question": "Based on my current sales data and customer feedback, which promotion should I run this week to maximize revenue?",
+        "icon": "local_offer",
+        "color": "orange",
+        "type": "both"
+    },
+]
+
+QUICK_ACTIONS = [
+    {"label": "📋 Shift Brief", "action": "shift_brief"},
+    {"label": "📈 Demand Forecast", "action": "forecast"},
+    {"label": "🚨 Anomaly Scan", "action": "alerts"},
 ]
 
 # =============================================================================
@@ -2594,21 +2607,21 @@ def render_live_orders():
         <div style="background: linear-gradient(90deg, #29B5E8 0%, #0068C9 100%); padding: 12px 20px; border-radius: 8px; margin: 10px 0;">
             <div style="display: flex; justify-content: space-between; align-items: center; color: white;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 20px;">🤖</span>
-                    <span style="font-weight: 600;">AI Impact Today</span>
+                    <span style="font-size: 20px;">📊</span>
+                    <span style="font-weight: 600;">Today's Ops Snapshot</span>
                 </div>
                 <div style="display: flex; gap: 30px;">
                     <div style="text-align: center;">
                         <div style="font-size: 20px; font-weight: 700;">${money_saved}</div>
-                        <div style="font-size: 11px; opacity: 0.9;">Saved in Refunds</div>
+                        <div style="font-size: 11px; opacity: 0.9;">Refunds Avoided</div>
                     </div>
                     <div style="text-align: center;">
                         <div style="font-size: 20px; font-weight: 700;">{time_saved} min</div>
-                        <div style="font-size: 11px; opacity: 0.9;">Routing Efficiency</div>
+                        <div style="font-size: 11px; opacity: 0.9;">Avg Route Time</div>
                     </div>
                     <div style="text-align: center;">
                         <div style="font-size: 20px; font-weight: 700;">{prevented_late}</div>
-                        <div style="font-size: 11px; opacity: 0.9;">Late Orders Prevented</div>
+                        <div style="font-size: 11px; opacity: 0.9;">Delays Prevented</div>
                     </div>
                 </div>
             </div>
@@ -2645,46 +2658,6 @@ def render_live_orders():
             <span style="color: white; font-weight: 500;">🎬 Demo Scenario Active: {" • ".join(scenario_parts)}</span>
         </div>
         """, unsafe_allow_html=True)
-    
-    # Weather-based route advisory (always visible, compact)
-    weather_adjustments = WEATHER_ROUTE_ADJUSTMENTS.get(weather_condition, {})
-    if weather_adjustments:
-        st.markdown(f"**🚗 Weather Route Advisory: {weather_condition}**")
-        advice_text = weather_adjustments.get('general_advice', '')
-        route_tips = weather_adjustments.get('route_tips', [])
-        time_adj = weather_adjustments.get('time_adjustment', 1.0)
-        
-        # Compact display
-        advice_parts = [advice_text] if advice_text else []
-        if route_tips:
-            tip_text = " | ".join([f"**{tip['zone']}**: {tip['tip']}" for tip in route_tips[:2]])
-            advice_parts.append(tip_text)
-        if time_adj > 1.0:
-            advice_parts.append(f"⏱️ +{int((time_adj - 1) * 100)}% delivery times")
-        
-        st.caption(" • ".join(advice_parts) if advice_parts else "Normal conditions")
-    
-    # Traffic Hotspots for Drivers (based on time of day)
-    current_hour = datetime.now().hour
-    is_rush_hour = (7 <= current_hour <= 9) or (16 <= current_hour <= 19)
-    is_lunch_rush = (11 <= current_hour <= 13)
-    
-    if is_rush_hour or is_lunch_rush:
-        # Show traffic alerts for high-risk zones
-        rush_type = "Rush Hour" if is_rush_hour else "Lunch Rush"
-        hotspot_zones = [zone for zone, info in DELIVERY_ZONES.items() if info.get("risk_level") == "high"]
-        
-        if hotspot_zones:
-            hotspot_tips = []
-            for zone in hotspot_zones[:3]:  # Show top 3
-                zone_info = DELIVERY_ZONES[zone]
-                alt = zone_info.get("alternate_route")
-                if alt:
-                    hotspot_tips.append(f"**{zone}**: {alt}")
-            
-            if hotspot_tips:
-                st.markdown(f"**🚦 {rush_type} Traffic Tips**")
-                st.caption(" | ".join(hotspot_tips))
     
     st.divider()
     
@@ -3053,7 +3026,7 @@ def build_delivery_map_data(db, active_deliveries, weather=None):
         "lat": store_lat,
         "lon": store_lon,
         "color": MAP_CONFIG.get("colors", {}).get("store", [255, 87, 51, 255]),
-        "size": 100,
+        "size": 40,
     }]
     
     # Driver/delivery markers
@@ -3123,7 +3096,7 @@ def build_delivery_map_data(db, active_deliveries, weather=None):
                 "lat": dest_lat,
                 "lon": dest_lon,
                 "color": MAP_CONFIG.get("colors", {}).get("customer", [33, 150, 243, 255]),
-                "size": 60,
+                "size": 40,
             })
             
             # Get actual delivery progress from order
@@ -3163,37 +3136,15 @@ def build_delivery_map_data(db, active_deliveries, weather=None):
                     "lat": driver_lat,
                     "lon": driver_lon,
                     "color": driver_color,
-                    "size": 90,
+                    "size": 40,
                     "angle": 0,
                     "order_label": order_short,
                     "driver_id": order.driver_id,
                 })
             
-            # Route color based on conditions - default to green (normal)
-            route_rgba = [
-                [255, 59, 48, 180],
-                [255, 149, 0, 180],
-                [255, 204, 0, 180],
-                [52, 199, 89, 180],
-                [0, 122, 255, 180],
-                [175, 82, 222, 180],
-                [162, 132, 94, 180],
-                [255, 255, 255, 180],
-            ]
-            r_idx = st.session_state.get("driver_color_mapping", {}).get(order.driver_id, 3)
-            route_color = route_rgba[r_idx % len(route_rgba)]
-            
-            if weather and weather.delivery_multiplier >= 1.5:
-                route_color = [244, 67, 54, 200]
-            elif weather and weather.delivery_multiplier >= 1.2:
-                route_color = [255, 152, 0, 200]
-            
-            # Build route path using actual road coordinates
             if order.route_coords and len(order.route_coords) > 1:
-                # Use OSRM route coordinates - format for PathLayer
                 route_path = [[coord[0], coord[1]] for coord in order.route_coords]
             else:
-                # Generate route
                 route_result = get_route_coordinates(store_lon, store_lat, dest_lon, dest_lat)
                 if isinstance(route_result, tuple):
                     route_path = route_result[0]
@@ -3207,7 +3158,7 @@ def build_delivery_map_data(db, active_deliveries, weather=None):
             
             route_data.append({
                 "path": route_path,
-                "color": route_color,
+                "color": [0, 122, 255, 200],
                 "name": f"#{order_short} → {customer_name}",
                 "reason": route_reason,
                 "order_id": order_short,
@@ -3309,7 +3260,7 @@ def render_pydeck_map(map_data):
     deck = pdk.Deck(
         layers=layers,
         initial_view_state=view_state,
-        map_style="mapbox://styles/mapbox/dark-v10",
+        map_style="dark",
         tooltip={
             "html": "<b>{name}</b><br/>{reason}",
             "style": {"backgroundColor": "steelblue", "color": "white"}
@@ -3319,14 +3270,14 @@ def render_pydeck_map(map_data):
     
     st.pydeck_chart(deck, use_container_width=True, height=450)
     
-    # Compact legend
+    # Compact legend with inline HTML dots matching actual RGBA values
     st.markdown("""
-    <div style="display: flex; flex-wrap: wrap; gap: 15px; font-size: 12px; margin-top: 10px;">
-        <span>🟠 Store</span>
-        <span>🔵 Customers</span>
-        <span>🟢 Drivers</span>
-        <span>🟢 Route (normal)</span>
-        <span style="color: #f44336;">● Traffic Zone</span>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:12px;margin-top:10px;color:#ccc;">
+        <span><span style="color:#FF5733;">●</span> Store</span>
+        <span><span style="color:#BB86FC;">●</span> Customers</span>
+        <span><span style="color:#FFC107;">●</span> Drivers (color-coded)</span>
+        <span><span style="color:#007AFF;">●</span> Route</span>
+        <span><span style="color:#FFC107;">◉</span> Traffic Zone</span>
     </div>
     """, unsafe_allow_html=True)
     
@@ -3348,7 +3299,7 @@ def render_empty_map():
         "lat": store_lat,
         "lon": store_lon,
         "color": [255, 87, 51, 255],
-        "size": 100,
+        "size": 40,
     }]
     
     # Get active traffic hotspots
@@ -3403,7 +3354,7 @@ def render_empty_map():
     deck = pdk.Deck(
         layers=layers,
         initial_view_state=view_state,
-        map_style="mapbox://styles/mapbox/dark-v10",
+        map_style="dark",
         tooltip={
             "html": "<b>{name}</b><br/>{reason}",
             "style": {"backgroundColor": "steelblue", "color": "white"}
@@ -3488,76 +3439,26 @@ def _get_ops_snapshot() -> dict:
     }
 
 
-def render_intelligence_dashboard():
-    """Render the AI Intelligence dashboard with all four Cortex features."""
-
-    if not PIPELINE_AVAILABLE:
-        st.info("Start the pipeline from Live Orders first to generate data for intelligence features.")
-        return
-
-    if not init_pipeline_services():
-        st.info("Initialize services from Live Orders view first.")
-        return
-
-    sync_unified_state_orders()
-
-    st.markdown("""
-    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px 25px; border-radius: 16px; margin-bottom: 20px;">
-        <div style="display:flex; align-items:center; gap:15px;">
-            <span style="font-size:40px;">🧠</span>
-            <div>
-                <div style="font-size:22px; font-weight:bold; color:white;">Snowflake Intelligence Dashboard</div>
-                <div style="color:rgba(255,255,255,0.8); font-size:14px;">Cortex AI · Demand Forecasting · Anomaly Detection · Natural Language Analytics</div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    tab_summary, tab_forecast, tab_alerts, tab_analyst = st.tabs([
-        "📋 Shift Brief", "📈 Demand Forecast", "🚨 Smart Alerts", "🔍 Ask Your Data"
-    ])
-
-    # ── Tab 1: Live Cortex Summary ──────────────────────────────────────────
-    with tab_summary:
-        _render_shift_brief()
-
-    # ── Tab 2: AI Demand Forecast ───────────────────────────────────────────
-    with tab_forecast:
-        _render_demand_forecast()
-
-    # ── Tab 3: Smart Notifications ──────────────────────────────────────────
-    with tab_alerts:
-        _render_smart_alerts()
-
-    # ── Tab 4: Cortex Analyst ───────────────────────────────────────────────
-    with tab_analyst:
-        _render_cortex_analyst()
 
 
-# ─── TAB 1: Shift Brief ────────────────────────────────────────────────────
+# =============================================================================
+# QUICK ACTION HANDLERS (feed intelligence results into chat)
+# =============================================================================
 
-def _render_shift_brief():
-    """One-click AI-generated shift intelligence brief."""
-    st.markdown("### 📋 AI Shift Intelligence Brief")
-    st.caption("Cortex generates a real-time operations summary with recommended actions")
+def _build_shift_brief_prompt() -> tuple[str, str]:
+    """Build the shift brief prompt and return (user_label, prompt)."""
+    snap = _get_ops_snapshot()
+    zone_lines = "\n".join(
+        f"  - {z}: {d['count']} deliveries, {d['late']} late, avg {round(d['total_time']/d['count'],1)}min"
+        for z, d in snap["zone_performance"].items()
+    ) or "  No zone data yet"
+    driver_lines = "\n".join(
+        f"  - {d_id}: {d['count']} deliveries, {d['late']} late, avg {round(d['total_time']/d['count'],1)}min"
+        for d_id, d in snap["driver_performance"].items()
+    ) or "  No driver data yet"
+    late_reasons = ", ".join(snap["late_reasons"][:10]) or "None"
 
-    if st.button("🧠 Generate Shift Brief", type="primary", use_container_width=True, key="gen_brief"):
-        st.session_state.intel_brief_pending = True
-
-    if st.session_state.get("intel_brief_pending"):
-        with st.spinner("Cortex is analyzing your operations..."):
-            snap = _get_ops_snapshot()
-            zone_lines = "\n".join(
-                f"  - {z}: {d['count']} deliveries, {d['late']} late, avg {round(d['total_time']/d['count'],1)}min"
-                for z, d in snap["zone_performance"].items()
-            ) or "  No zone data yet"
-            driver_lines = "\n".join(
-                f"  - {d_id}: {d['count']} deliveries, {d['late']} late, avg {round(d['total_time']/d['count'],1)}min"
-                for d_id, d in snap["driver_performance"].items()
-            ) or "  No driver data yet"
-            late_reasons = ", ".join(snap["late_reasons"][:10]) or "None"
-
-            prompt = f"""You are an AI operations analyst for Chicago Loop Pizza.
+    prompt = f"""You are an AI operations analyst for Chicago Loop Pizza.
 Generate a concise shift intelligence brief for the store manager. Today is {snap['day_of_week']}, current hour: {snap['current_hour']}:00.
 
 CURRENT STATE:
@@ -3576,7 +3477,8 @@ DRIVER PERFORMANCE:
 LATE DELIVERY REASONS: {late_reasons}
 
 Format your response EXACTLY as:
-## 🟢 Shift Status: [Good/Warning/Critical]
+## [emoji] Shift Status: [Good/Warning/Critical]
+Use 🟢 for Good, 🟡 for Warning, 🔴 for Critical.
 [One sentence overall assessment]
 
 ### 📊 Key Metrics
@@ -3594,44 +3496,21 @@ Format your response EXACTLY as:
 
 ### 📈 Shift Outlook
 [2 sentences: forecast for rest of shift and one proactive recommendation]"""
-
-            try:
-                response = _cortex_complete(prompt)
-                st.session_state.intel_brief_result = response
-                st.session_state.intel_brief_pending = False
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error generating brief: {e}")
-                st.session_state.intel_brief_pending = False
-
-    if st.session_state.get("intel_brief_result"):
-        st.markdown(st.session_state.intel_brief_result)
-        st.caption(f"_Generated at {datetime.now().strftime('%I:%M %p')} by Snowflake Cortex (claude-3-5-sonnet)_")
+    return "Generate a shift intelligence brief", prompt
 
 
-# ─── TAB 2: Demand Forecast ────────────────────────────────────────────────
+def _build_forecast_prompt() -> tuple[str, str]:
+    """Build the demand forecast prompt and return (user_label, prompt)."""
+    snap = _get_ops_snapshot()
+    hourly_data = {}
+    facts = list(get_database().delivery_facts.values())
+    for f in facts:
+        h = f.delivery_hour
+        hourly_data.setdefault(h, 0)
+        hourly_data[h] += 1
+    hourly_str = ", ".join(f"{h}:00={c}" for h, c in sorted(hourly_data.items())) or "No historical data"
 
-def _render_demand_forecast():
-    """AI-powered demand prediction with staffing recommendations."""
-    st.markdown("### 📈 AI Demand Forecast")
-    st.caption("Cortex predicts order volume for the next 3 hours with staffing recommendations")
-
-    if st.button("🔮 Generate Forecast", type="primary", use_container_width=True, key="gen_forecast"):
-        st.session_state.intel_forecast_pending = True
-
-    if st.session_state.get("intel_forecast_pending"):
-        with st.spinner("Cortex is analyzing demand patterns..."):
-            snap = _get_ops_snapshot()
-
-            hourly_data = {}
-            facts = list(get_database().delivery_facts.values())
-            for f in facts:
-                h = f.delivery_hour
-                hourly_data.setdefault(h, 0)
-                hourly_data[h] += 1
-            hourly_str = ", ".join(f"{h}:00={c}" for h, c in sorted(hourly_data.items())) or "No historical data"
-
-            prompt = f"""You are an AI demand forecasting engine for Chicago Loop Pizza.
+    prompt = f"""You are an AI demand forecasting engine for Chicago Loop Pizza.
 Today is {snap['day_of_week']}, current time: {snap['current_hour']}:00.
 
 HISTORICAL ORDER VOLUME BY HOUR TODAY: {hourly_str}
@@ -3662,46 +3541,23 @@ Provide your forecast EXACTLY as:
 
 ### 💡 Revenue Opportunity
 [One specific actionable recommendation to maximize revenue in the next 3 hours, referencing real data]"""
-
-            try:
-                response = _cortex_complete(prompt)
-                st.session_state.intel_forecast_result = response
-                st.session_state.intel_forecast_pending = False
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error generating forecast: {e}")
-                st.session_state.intel_forecast_pending = False
-
-    if st.session_state.get("intel_forecast_result"):
-        st.markdown(st.session_state.intel_forecast_result)
-        st.caption(f"_Generated at {datetime.now().strftime('%I:%M %p')} by Snowflake Cortex (claude-3-5-sonnet)_")
+    return "Generate a demand forecast for the next 3 hours", prompt
 
 
-# ─── TAB 3: Smart Alerts ───────────────────────────────────────────────────
+def _build_alerts_prompt() -> tuple[str, str]:
+    """Build the anomaly scan prompt and return (user_label, prompt)."""
+    snap = _get_ops_snapshot()
+    zone_str = "\n".join(
+        f"  {z}: {d['count']} orders, {d['late']} late ({round(d['late']/d['count']*100,1) if d['count'] else 0}%), avg {round(d['total_time']/d['count'],1) if d['count'] else 0}min"
+        for z, d in snap["zone_performance"].items()
+    ) or "  No data"
+    driver_str = "\n".join(
+        f"  {d_id}: {d['count']} orders, {d['late']} late, avg {round(d['total_time']/d['count'],1) if d['count'] else 0}min"
+        for d_id, d in snap["driver_performance"].items()
+    ) or "  No data"
+    late_reasons = ", ".join(snap["late_reasons"][:15]) or "None"
 
-def _render_smart_alerts():
-    """Real-time anomaly detection with AI-powered alerts."""
-    st.markdown("### 🚨 Smart Anomaly Detection")
-    st.caption("Cortex monitors your operations and flags issues in real-time")
-
-    if st.button("🔍 Run Anomaly Scan", type="primary", use_container_width=True, key="gen_alerts"):
-        st.session_state.intel_alerts_pending = True
-
-    if st.session_state.get("intel_alerts_pending"):
-        with st.spinner("Cortex is scanning for anomalies..."):
-            snap = _get_ops_snapshot()
-
-            zone_str = "\n".join(
-                f"  {z}: {d['count']} orders, {d['late']} late ({round(d['late']/d['count']*100,1) if d['count'] else 0}%), avg {round(d['total_time']/d['count'],1) if d['count'] else 0}min"
-                for z, d in snap["zone_performance"].items()
-            ) or "  No data"
-            driver_str = "\n".join(
-                f"  {d_id}: {d['count']} orders, {d['late']} late, avg {round(d['total_time']/d['count'],1) if d['count'] else 0}min"
-                for d_id, d in snap["driver_performance"].items()
-            ) or "  No data"
-            late_reasons = ", ".join(snap["late_reasons"][:15]) or "None"
-
-            prompt = f"""You are an AI anomaly detection system for Chicago Loop Pizza.
+    prompt = f"""You are an AI anomaly detection system for Chicago Loop Pizza.
 Analyze the following operational data and identify any anomalies, risks, or patterns that need attention.
 
 CURRENT STATE ({snap['day_of_week']}, {snap['current_hour']}:00):
@@ -3741,110 +3597,211 @@ Format your response EXACTLY as:
 
 ### 📊 Anomaly Score: [1-10]/10
 [One sentence: overall operations health assessment]"""
+    return "Run an anomaly scan on current operations", prompt
 
-            try:
-                response = _cortex_complete(prompt)
-                st.session_state.intel_alerts_result = response
-                st.session_state.intel_alerts_pending = False
+
+def process_quick_action(action: str):
+    """Execute a quick action and inject results into chat history."""
+    if not PIPELINE_AVAILABLE or not init_pipeline_services():
+        st.warning("Start the pipeline from Live Orders first to use AI features.")
+        return
+
+    sync_unified_state_orders()
+
+    builders = {
+        "shift_brief": _build_shift_brief_prompt,
+        "forecast": _build_forecast_prompt,
+        "alerts": _build_alerts_prompt,
+    }
+
+    builder = builders.get(action)
+    if not builder:
+        return
+
+    user_label, prompt = builder()
+
+    st.session_state.messages.append({
+        "role": "user",
+        "content": [{"type": "text", "text": user_label}],
+        "query_type": "quick_action"
+    })
+
+    try:
+        response = _cortex_complete(prompt)
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": [{"type": "text", "text": response}],
+            "query_type": "quick_action",
+        })
+    except Exception as e:
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": [{"type": "text", "text": f"Error generating response: {e}"}],
+            "query_type": "quick_action",
+        })
+
+
+# =============================================================================
+# UNIFIED AI CO-PILOT VIEW
+# =============================================================================
+
+def render_copilot():
+    """Unified AI Co-Pilot: intelligence actions + conversational chat in one view."""
+
+    # Process pending quick action
+    if st.session_state.get("pending_quick_action"):
+        action = st.session_state.pending_quick_action
+        st.session_state.pending_quick_action = None
+        with st.spinner("Cortex is analyzing your operations..."):
+            process_quick_action(action)
+        st.rerun()
+
+    # Process pending question from pills/sidebar
+    if st.session_state.pending_question:
+        question = st.session_state.pending_question
+        q_type = st.session_state.get("pending_type")
+        st.session_state.pending_question = None
+        st.session_state.pending_type = None
+        st.session_state.processing = True
+        process_user_question(question, q_type)
+        st.session_state.processing = False
+        st.rerun()
+
+    # Welcome screen when chat is empty
+    if not st.session_state.messages and not st.session_state.processing:
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px 25px; border-radius: 16px; margin-bottom: 20px;">
+            <div style="display:flex; align-items:center; gap:15px;">
+                <span style="font-size:36px;">🧠</span>
+                <div>
+                    <div style="font-size:20px; font-weight:bold; color:white;">AI Co-Pilot</div>
+                    <div style="color:rgba(255,255,255,0.8); font-size:13px;">Real-time intelligence, forecasting, anomaly detection & natural language analytics</div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("##### Quick Actions")
+        qa_cols = st.columns(len(QUICK_ACTIONS))
+        for i, qa in enumerate(QUICK_ACTIONS):
+            with qa_cols[i]:
+                if st.button(qa["label"], use_container_width=True, key=f"qa_{qa['action']}"):
+                    st.session_state.pending_quick_action = qa["action"]
+                    st.rerun()
+
+        st.markdown("")
+        st.markdown("##### Ask a question")
+        demo_labels = [q["label"] for q in DEMO_QUESTIONS]
+        picked = st.pills("Try a question", demo_labels, key="copilot_demo_pills")
+        if picked:
+            match = next((q for q in DEMO_QUESTIONS if q["label"] == picked), None)
+            if match:
+                store_question = f"For {st.session_state.selected_store}: {match['question']}"
+                st.session_state.pending_question = store_question
+                st.session_state.pending_type = match.get("type")
                 st.rerun()
-            except Exception as e:
-                st.error(f"Error running anomaly scan: {e}")
-                st.session_state.intel_alerts_pending = False
 
-    if st.session_state.get("intel_alerts_result"):
-        st.markdown(st.session_state.intel_alerts_result)
-        st.caption(f"_Scanned at {datetime.now().strftime('%I:%M %p')} by Snowflake Cortex (claude-3-5-sonnet)_")
+    # Display chat history
+    for idx, message in enumerate(st.session_state.messages):
+        role = message["role"]
+        content = message["content"]
+        query_type = message.get("query_type", "analyst")
 
-
-# ─── TAB 4: Cortex Analyst ─────────────────────────────────────────────────
-
-def _render_cortex_analyst():
-    """Natural language query interface over delivery data via Cortex Analyst."""
-    st.markdown("### 🔍 Ask Your Data")
-    st.caption("Ask questions in plain English — Cortex Analyst generates SQL and returns results")
-
-    quick_questions = [
-        "Average delivery time by zone",
-        "Revenue by day of week",
-        "Drivers with most late deliveries",
-        "Top delay reasons",
-        "Total orders and revenue last 7 days",
-    ]
-
-    selected_q = st.pills("Try a question", quick_questions, key="analyst_pills")
-    if selected_q:
-        st.session_state.intel_analyst_question = selected_q
-
-    user_q = st.text_input("Or type your own:", placeholder="e.g., What percentage of deliveries are late on weekends?", key="analyst_input")
-    if user_q:
-        st.session_state.intel_analyst_question = user_q
-
-    if st.session_state.get("intel_analyst_question"):
-        question = st.session_state.intel_analyst_question
-        st.session_state.intel_analyst_question = None
-
-        with st.spinner(f"Cortex Analyst is processing: *{question}*"):
-            try:
-                messages = [{"role": "user", "content": [{"type": "text", "text": question}]}]
-                response = send_analyst_message(messages)
-
-                if response and response.get("message"):
-                    msg_content = response["message"].get("content", [])
-                    sql_text = None
-                    text_response = None
-
-                    for block in msg_content:
-                        if block.get("type") == "sql":
-                            sql_text = block.get("statement", "")
-                        elif block.get("type") == "text":
-                            text_response = block.get("text", "")
-
-                    if text_response:
-                        st.markdown(text_response)
-
-                    if sql_text:
-                        with st.expander("📝 Generated SQL", expanded=False):
-                            st.code(sql_text, language="sql")
-
-                        try:
-                            conn = get_snowflake_connection()
-                            df = conn.session().sql(sql_text).to_pandas()
-
-                            st.markdown("#### 📊 Results")
-                            st.dataframe(df, use_container_width=True, hide_index=True)
-
-                            numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-                            skip_cols = ['id', 'year', 'month', 'day', 'hour']
-                            chart_cols = [c for c in numeric_cols if not any(s in c.lower() for s in skip_cols)]
-
-                            if chart_cols and len(df) > 1 and len(df) <= 50:
-                                non_numeric = [c for c in df.columns if c not in numeric_cols]
-                                if non_numeric:
-                                    st.markdown("#### 📈 Chart")
-                                    st.bar_chart(df.set_index(non_numeric[0])[chart_cols[:3]])
-
-                            with st.spinner("Generating insights..."):
-                                data_str = df.to_string(index=False)
-                                insight = _cortex_complete(f"""Based on this data for Chicago Loop Pizza, provide 3 bullet point insights:
-Question: {question}
-Data:
-{data_str[:2000]}
-
-Format: 3 short bullet points with actionable insights. Use real numbers from the data.""")
-                                if insight:
-                                    st.markdown("#### 💡 AI Insights")
-                                    st.markdown(insight)
-
-                        except Exception as e:
-                            st.warning(f"Could not execute SQL: {e}")
-                    elif not text_response:
-                        st.info("Cortex Analyst could not generate a response for this question. Try rephrasing.")
+        if role == "user":
+            with st.chat_message("user"):
+                if isinstance(content, str):
+                    text = content
+                elif isinstance(content, list) and content:
+                    text = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])
                 else:
-                    st.warning("No response from Cortex Analyst.")
-            except Exception as e:
-                st.error(f"Error querying Cortex Analyst: {e}")
+                    text = ""
+                st.markdown(text)
+        else:
+            with st.chat_message("assistant", avatar=":material/robot:"):
+                if query_type == "quick_action":
+                    if isinstance(content, str):
+                        text = content
+                    elif isinstance(content, list) and content:
+                        text = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])
+                    else:
+                        text = ""
+                    st.markdown(text)
+                elif query_type == "search":
+                    if isinstance(content, str):
+                        text = content
+                    elif isinstance(content, list) and content:
+                        text = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])
+                    else:
+                        text = ""
+                    documents = message.get("documents", [])
+                    display_search_content(text, documents, idx)
+                    recommendations = message.get("recommendations")
+                    if recommendations:
+                        st.divider()
+                        st.markdown("### 💡 Answer & Recommendations")
+                        st.markdown(recommendations)
+                elif query_type == "both":
+                    sql = message.get("sql")
+                    documents = message.get("documents", [])
+                    recommendations = message.get("recommendations")
 
-        st.caption(f"_Powered by Snowflake Cortex Analyst + claude-3-5-sonnet_")
+                    st.markdown("### 📊 Data Analysis")
+                    display_message_content(content, idx)
+                    if sql:
+                        display_sql_results(sql)
+                    if documents:
+                        st.markdown("### 📋 Related Documents Found")
+                        doc_types = set(doc.get('DOCUMENT_TYPE', '') for doc in documents)
+                        st.caption(f"Found {len(documents)} relevant documents: {', '.join(filter(None, doc_types))}")
+                    if recommendations:
+                        st.divider()
+                        st.markdown("### 🎯 Combined Analysis & Recommendations")
+                        st.markdown(recommendations)
+                else:
+                    sql = display_message_content(content, idx)
+                    if sql:
+                        st.divider()
+                        display_sql_results(sql)
+                    recommendations = message.get("recommendations")
+                    if recommendations:
+                        st.divider()
+                        st.markdown("### 💡 Manager Recommendations")
+                        st.markdown(recommendations)
+
+    # Quick action buttons when chat has history (compact row above input)
+    if st.session_state.messages:
+        qa_cols2 = st.columns(len(QUICK_ACTIONS) + 1)
+        for i, qa in enumerate(QUICK_ACTIONS):
+            with qa_cols2[i]:
+                if st.button(qa["label"], key=f"qa_inline_{qa['action']}", use_container_width=True):
+                    st.session_state.pending_quick_action = qa["action"]
+                    st.rerun()
+        with qa_cols2[-1]:
+            demo_labels = [q["label"] for q in DEMO_QUESTIONS]
+            picked2 = st.pills("Questions", demo_labels, key="copilot_inline_pills", label_visibility="collapsed")
+            if picked2:
+                match = next((q for q in DEMO_QUESTIONS if q["label"] == picked2), None)
+                if match:
+                    store_question = f"For {st.session_state.selected_store}: {match['question']}"
+                    st.session_state.pending_question = store_question
+                    st.session_state.pending_type = match.get("type")
+                    st.rerun()
+
+    # Handle any remaining pending question
+    if st.session_state.pending_question and not st.session_state.processing:
+        question = st.session_state.pending_question
+        st.session_state.pending_question = None
+        st.session_state.processing = True
+        process_user_question(question)
+        st.session_state.processing = False
+        st.rerun()
+
+    # Chat input
+    if prompt := st.chat_input("Ask about sales, deliveries, promos, forecasts, or customer reviews..."):
+        st.session_state.processing = True
+        process_user_question(prompt)
+        st.session_state.processing = False
+        st.rerun()
 
 
 # =============================================================================
@@ -3926,16 +3883,10 @@ def main():
         </div>
         """, unsafe_allow_html=True)
     
-    # Main content area - view selector that syncs with session state
-    view_options = ["🚀 Live Orders", "🧠 Intelligence", "💬 Chat Assistant"]
+    # Main content area - two views
+    view_options = ["🚀 Live Orders", "🧠 AI Co-Pilot"]
     
-    # Determine current index based on active view
-    if st.session_state.active_view == "Chat":
-        current_index = 2
-    elif st.session_state.active_view == "Intelligence":
-        current_index = 1
-    else:
-        current_index = 0
+    current_index = 1 if st.session_state.active_view == "CoPilot" else 0
     
     selected_view = st.radio(
         "View",
@@ -3945,137 +3896,15 @@ def main():
         label_visibility="collapsed"
     )
     
-    # Update session state based on selection
-    if selected_view == "💬 Chat Assistant":
-        st.session_state.active_view = "Chat"
-    elif selected_view == "🧠 Intelligence":
-        st.session_state.active_view = "Intelligence"
-    else:
-        st.session_state.active_view = "LiveOrders"
+    st.session_state.active_view = "CoPilot" if selected_view == "🧠 AI Co-Pilot" else "LiveOrders"
     
     st.divider()
     
     # Render the selected view
     if st.session_state.active_view == "LiveOrders":
         render_live_orders()
-    elif st.session_state.active_view == "Intelligence":
-        render_intelligence_dashboard()
     else:
-        # Chat view
-        # Process pending question from sidebar
-        if st.session_state.pending_question:
-            question = st.session_state.pending_question
-            q_type = st.session_state.get("pending_type")
-            st.session_state.pending_question = None
-            st.session_state.pending_type = None
-            st.session_state.processing = True
-            process_user_question(question, q_type)
-            st.session_state.processing = False
-            st.rerun()
-        
-        # Main content area - show welcome message if no chat history
-        if not st.session_state.messages and not st.session_state.processing:
-            st.markdown(f"""
-            ### Welcome, {st.session_state.selected_store} Manager! 👋
-            
-            I'm your AI assistant powered by **Snowflake Cortex**. I can help you understand:
-            
-            - 📦 **Delivery Performance** - Are deliveries on time? What's causing delays?
-            - 🍕 **Kitchen Capacity** - Equipment status, production capacity
-            - 💰 **Revenue Impact** - How issues are affecting your bottom line
-            - 💬 **Customer Feedback** - What are customers saying about your store?
-            """)
-            
-            demo_labels = [q["label"] for q in DEMO_QUESTIONS]
-            picked = st.pills("Try a question", demo_labels, key="chat_demo_pills")
-            if picked:
-                match = next((q for q in DEMO_QUESTIONS if q["label"] == picked), None)
-                if match:
-                    store_question = f"For {st.session_state.selected_store}: {match['question']}"
-                    st.session_state.pending_question = store_question
-                    st.session_state.pending_type = match.get("type")
-                    st.rerun()
-        
-        # Display chat history
-        for idx, message in enumerate(st.session_state.messages):
-            role = message["role"]
-            content = message["content"]
-            query_type = message.get("query_type", "analyst")
-            
-            if role == "user":
-                with st.chat_message("user"):
-                    # User content is simple text - handle both list and string formats
-                    if isinstance(content, str):
-                        text = content
-                    elif isinstance(content, list) and content:
-                        text = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])
-                    else:
-                        text = ""
-                    st.markdown(text)
-            else:
-                with st.chat_message("assistant", avatar=":material/robot:"):
-                    if query_type == "search":
-                        # Display search results - handle both list and string formats
-                        if isinstance(content, str):
-                            text = content
-                        elif isinstance(content, list) and content:
-                            text = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])
-                        else:
-                            text = ""
-                        documents = message.get("documents", [])
-                        display_search_content(text, documents, idx)
-                        # Display stored recommendations for search
-                        recommendations = message.get("recommendations")
-                        if recommendations:
-                            st.divider()
-                            st.markdown("### 💡 Answer & Recommendations")
-                            st.markdown(recommendations)
-                    elif query_type == "both":
-                        # Display combined results
-                        sql = message.get("sql")
-                        documents = message.get("documents", [])
-                        recommendations = message.get("recommendations")
-                        
-                        st.markdown("### 📊 Data Analysis")
-                        display_message_content(content, idx)
-                        if sql:
-                            display_sql_results(sql)
-                        if documents:
-                            st.markdown("### 📋 Related Documents Found")
-                            doc_types = set(doc.get('DOCUMENT_TYPE', '') for doc in documents)
-                            st.caption(f"Found {len(documents)} relevant documents: {', '.join(filter(None, doc_types))}")
-                        if recommendations:
-                            st.divider()
-                            st.markdown("### 🎯 Combined Analysis & Recommendations")
-                            st.markdown(recommendations)
-                    else:
-                        # Display analyst results
-                        sql = display_message_content(content, idx)
-                        if sql:
-                            st.divider()
-                            display_sql_results(sql)
-                        # Display stored recommendations
-                        recommendations = message.get("recommendations")
-                        if recommendations:
-                            st.divider()
-                            st.markdown("### 💡 Manager Recommendations")
-                            st.markdown(recommendations)
-        
-        # Handle pending question from suggestion buttons
-        if st.session_state.pending_question and not st.session_state.processing:
-            question = st.session_state.pending_question
-            st.session_state.pending_question = None
-            st.session_state.processing = True
-            process_user_question(question)
-            st.session_state.processing = False
-            st.rerun()
-        
-        # Chat input
-        if prompt := st.chat_input("Ask about sales, deliveries, inventory, or customer reviews..."):
-            st.session_state.processing = True
-            process_user_question(prompt)
-            st.session_state.processing = False
-            st.rerun()
+        render_copilot()
 
 
 if __name__ == "__main__":
