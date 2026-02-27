@@ -251,7 +251,7 @@ All apps share consistent data aligned with Snowflake:
 
 See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the full walkthrough.
 
-### Key Demo Questions (Cortex Analyst)
+### Key Demo Questions (Snowflake Intelligence)
 
 1. **Capacity Analysis** — "Show me the capacity gap by city for last Friday"
 2. **Delivery Performance** — "Which stores had the highest late delivery rates last Friday?"
