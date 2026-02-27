@@ -257,7 +257,7 @@ See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the full walkthrough.
 2. **Delivery Performance** — "Which stores had the highest late delivery rates last Friday?"
 3. **Revenue Impact** — "How much revenue are we losing with kitchen capacity issues?"
 4. **Crisis Dashboard** — "Which stores are in crisis mode right now?"
-5. **Promo Recommendations** — "Based on my sales data and feedback, which promo should I run this week?"
+5. **Promo Recommendations** — "How does weather impact sales at Chicago Loop? What promos work for each weather type?"
 
 ---
 
