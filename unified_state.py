@@ -106,11 +106,14 @@ def create_order(order_id: str, customer_name: str, customer_phone: str,
     """Create new order - called from Customer App"""
     state = load_state()
     
+    jitter_lat = lat + random.uniform(-0.01, 0.01)
+    jitter_lon = lon + random.uniform(-0.01, 0.01)
+    
     route_coords = None
     try:
-        route_coords, _, _ = get_route_from_osrm(STORE_LON, STORE_LAT, lon, lat)
+        route_coords, _, _ = get_route_from_osrm(STORE_LON, STORE_LAT, jitter_lon, jitter_lat)
     except:
-        route_coords = [[STORE_LON, STORE_LAT], [lon, lat]]
+        route_coords = [[STORE_LON, STORE_LAT], [jitter_lon, jitter_lat]]
     
     order = {
         "order_id": order_id,
@@ -119,8 +122,8 @@ def create_order(order_id: str, customer_name: str, customer_phone: str,
         "items": items,
         "address": address,
         "zone": zone,
-        "lat": lat,
-        "lon": lon,
+        "lat": jitter_lat,
+        "lon": jitter_lon,
         "total": total,
         "special_instructions": special_instructions,
         # Status flow: pending -> preparing -> ready -> picked_up -> on_the_way -> delivered

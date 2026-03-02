@@ -9,3 +9,7 @@ data/
 # Python cache
 __pycache__/
 *.pyc
+
+# Runtime state
+.pizza_unified_state.json
+shared_state/

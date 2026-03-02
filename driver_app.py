@@ -20,7 +20,7 @@ from unified_state import (
     load_state, get_driver_orders, get_driver_info, get_order,
     driver_pickup, start_delivery, advance_delivery, run_simulation_step, STORE_LAT, STORE_LON
 )
-from menu_data import STORE_NAME, DRIVERS
+from menu_data import STORE_NAME, DRIVERS, get_driver_color
 
 try:
     from shared_routes import get_route_from_osrm, get_driver_position_on_route
@@ -223,26 +223,25 @@ def render_order_map(order):
     # Get active traffic hotspots
     active_hotspots = get_active_traffic_hotspots()
     
-    # Build traffic zones data with colors
     traffic_zones = []
     for hotspot in active_hotspots:
         if hotspot in TRAFFIC_HOTSPOTS["always"]:
-            color = [244, 67, 54, 100]  # Red
+            color = [255, 152, 0, 120]
         else:
-            color = [255, 193, 7, 80]   # Yellow
+            color = [255, 193, 7, 90]
         
         traffic_zones.append({
             "name": hotspot["name"],
             "lat": hotspot["lat"],
             "lon": hotspot["lon"],
-            "radius": hotspot["radius"],
+            "radius": min(hotspot["radius"], 150),
             "color": color,
             "reason": hotspot["reason"],
         })
     
     layers = []
     
-    # Traffic zones layer (render first, behind other elements)
+    # Traffic zones layer (subtle background)
     if traffic_zones:
         traffic_layer = pdk.Layer(
             "ScatterplotLayer",
@@ -251,23 +250,25 @@ def render_order_map(order):
             get_color="color",
             get_radius="radius",
             pickable=True,
-            opacity=0.3,
+            opacity=0.4,
         )
         layers.append(traffic_layer)
     
     # Route line following actual roads
+    drv_rgba = get_driver_color(st.session_state.driver_id)["rgba"]
+    drv_route = drv_rgba[:3] + [200]
     route_layer = pdk.Layer(
         "PathLayer",
         data=[{
             "path": route_coords,
-            "color": [0, 122, 255, 200],
+            "color": drv_route,
             "name": f"Route to {order.get('customer_name', 'Customer')}",
             "reason": f"Order {order['order_id']}",
         }],
         get_path="path",
         get_color="color",
-        get_width=5,
-        width_min_pixels=4,
+        get_width=6,
+        width_min_pixels=3,
         pickable=True,
     )
     layers.append(route_layer)
@@ -279,14 +280,13 @@ def render_order_map(order):
         "lat": STORE_LAT,
         "lon": STORE_LON,
         "color": [255, 87, 51, 255],
-        "size": 40,
     }]
     store_layer = pdk.Layer(
         "ScatterplotLayer",
         data=store_data,
         get_position=["lon", "lat"],
         get_color="color",
-        get_radius="size",
+        get_radius=60,
         pickable=True,
     )
     layers.append(store_layer)
@@ -298,14 +298,13 @@ def render_order_map(order):
         "lat": customer_lat,
         "lon": customer_lon,
         "color": [187, 134, 252, 255],
-        "size": 40,
     }]
     customer_layer = pdk.Layer(
         "ScatterplotLayer",
         data=customer_data,
         get_position=["lon", "lat"],
         get_color="color",
-        get_radius="size",
+        get_radius=50,
         pickable=True,
     )
     layers.append(customer_layer)
@@ -317,15 +316,14 @@ def render_order_map(order):
             "reason": f"Delivering {order['order_id']}",
             "lat": driver_lat,
             "lon": driver_lon,
-            "color": [52, 199, 89, 255],
-            "size": 40,
+            "color": drv_rgba,
         }]
         driver_layer = pdk.Layer(
             "ScatterplotLayer",
             data=driver_data,
             get_position=["lon", "lat"],
             get_color="color",
-            get_radius="size",
+            get_radius=50,
             pickable=True,
         )
         layers.append(driver_layer)
@@ -352,12 +350,13 @@ def render_order_map(order):
     st.pydeck_chart(deck, use_container_width=True, height=450)
     
     # Legend with inline HTML dots matching actual RGBA values
-    st.markdown("""
+    drv_hex = get_driver_color(st.session_state.driver_id)["hex"]
+    st.markdown(f"""
     <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px;margin-top:8px;color:#ccc;">
         <span><span style="color:#FF5733;">●</span> Store</span>
         <span><span style="color:#BB86FC;">●</span> Customer</span>
-        <span><span style="color:#34C759;">●</span> You</span>
-        <span><span style="color:#007AFF;">●</span> Route</span>
+        <span><span style="color:{drv_hex};">●</span> You</span>
+        <span><span style="color:{drv_hex};">●</span> Route</span>
         <span><span style="color:#FFC107;">◉</span> Traffic Zone</span>
     </div>
     """, unsafe_allow_html=True)
@@ -477,7 +476,37 @@ def render_order_card(order, driver_info):
                 st.info(f"Calling {order['customer_name']} at {order['customer_phone']}...")
         with col2:
             if st.button("⚠️ Report Issue", use_container_width=True):
-                st.warning("Issue reported to dispatch.")
+                st.session_state["show_issue_form"] = order["order_id"]
+
+        if st.session_state.get("show_issue_form") == order["order_id"]:
+            issue_types = [
+                "🚗 Vehicle problem",
+                "🚧 Road blocked / construction",
+                "🏢 Can't access building",
+                "📍 Wrong address / can't find location",
+                "☎️ Customer not responding",
+                "🍕 Order damaged during transit",
+                "⚠️ Safety concern",
+                "📦 Other",
+            ]
+            selected = st.selectbox("What's the issue?", issue_types, key=f"issue_type_{order['order_id']}")
+            note = st.text_input("Quick note (optional):", key=f"issue_note_{order['order_id']}", placeholder="e.g. Gate code doesn't work")
+
+            sub_col1, sub_col2 = st.columns(2)
+            with sub_col1:
+                if st.button("📤 Submit", type="primary", use_container_width=True, key=f"submit_issue_{order['order_id']}"):
+                    from unified_state import update_order
+                    issue_text = f"{selected}"
+                    if note:
+                        issue_text += f" — {note}"
+                    update_order(order["order_id"], driver_issue=issue_text, driver_issue_time=datetime.now().strftime("%H:%M"))
+                    st.session_state["show_issue_form"] = None
+                    st.success(f"Issue reported to dispatch: {selected}")
+                    st.rerun()
+            with sub_col2:
+                if st.button("Cancel", use_container_width=True, key=f"cancel_issue_{order['order_id']}"):
+                    st.session_state["show_issue_form"] = None
+                    st.rerun()
 
 
 def render_driver_stats(driver_info, driver_id):

@@ -238,10 +238,10 @@ def create_demo_order():
             items_options.append(combo)
     else:
         items_options = [
-            ["Pepperoni Classic", "Garlic Bread", "2L Coca-Cola"],
-            ["Margherita", "Caesar Salad", "Tiramisu"],
-            ["Meat Lovers", "Buffalo Wings (8pc)", "Cheesy Bread"],
-            ["BBQ Chicken", "Mozzarella Sticks", "Chocolate Brownie"],
+            ["Classic Pepperoni", "Garlic Breadsticks", "Coca-Cola (2L)"],
+            ["Margherita", "Caesar Salad", "New York Cheesecake"],
+            ["Meat Lovers", "Buffalo Wings (8pc)", "Stuffed Cheesy Bread"],
+            ["BBQ Chicken", "Mozzarella Sticks (6pc)", "Chocolate Lava Cake"],
         ]
     
     customer = random.choice(customers)

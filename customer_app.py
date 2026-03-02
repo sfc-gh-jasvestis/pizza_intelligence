@@ -20,7 +20,7 @@ from unified_state import (
     load_state, create_order, get_order, rate_order, 
     get_all_drivers, run_simulation_step, next_order_id, STORE_LAT, STORE_LON
 )
-from menu_data import MENU_ITEMS, DELIVERY_ZONES, STORE_NAME, DRIVERS
+from menu_data import MENU_ITEMS, DELIVERY_ZONES, STORE_NAME, DRIVERS, get_driver_color
 
 try:
     from shared_routes import get_route_from_osrm, get_driver_position_on_route
@@ -130,7 +130,18 @@ st.markdown("""
     
     [data-testid="stHorizontalBlock"] {
         gap: 1rem;
-        align-items: stretch;
+        align-items: stretch !important;
+    }
+    
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        display: flex;
+        flex-direction: column;
+    }
+    
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] > div {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
     }
     
     /* Menu Card - Digital Board Style */
@@ -141,23 +152,30 @@ st.markdown("""
         transition: all 0.3s ease;
         border: 1px solid rgba(255,107,53,0.1);
         box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        display: flex;
+        flex-direction: column;
     }
     
     .menu-card:hover {
-        transform: translateY(-5px);
+        transform: translateY(-3px);
         box-shadow: 0 15px 40px rgba(255,107,53,0.2);
         border-color: rgba(255,107,53,0.3);
     }
     
     .menu-card-image {
         width: 100%;
-        height: 140px;
+        height: 150px;
         object-fit: cover;
         border-bottom: 3px solid #FF6B35;
+        flex-shrink: 0;
+        background: #1f1f35;
     }
     
     .menu-card-content {
-        padding: 14px 16px;
+        padding: 12px 14px;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
     }
     
     .menu-card-header {
@@ -169,7 +187,7 @@ st.markdown("""
     }
     
     .menu-card-name {
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 700;
         color: white;
         margin: 0;
@@ -183,10 +201,10 @@ st.markdown("""
     .menu-card-price {
         background: linear-gradient(135deg, #FF6B35 0%, #ff8c42 100%);
         color: white;
-        padding: 5px 12px;
+        padding: 4px 10px;
         border-radius: 20px;
         font-weight: 700;
-        font-size: 14px;
+        font-size: 13px;
         box-shadow: 0 4px 15px rgba(255,107,53,0.4);
         white-space: nowrap;
         flex-shrink: 0;
@@ -197,6 +215,7 @@ st.markdown("""
         font-size: 12px;
         margin: 0;
         line-height: 1.4;
+        min-height: 34px;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
@@ -409,6 +428,13 @@ st.markdown("""
         opacity: 0.5;
     }
     
+    /* Consistent button spacing under menu cards */
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] .stButton > button {
+        font-size: 13px;
+        padding: 6px 12px;
+        border-radius: 10px;
+    }
+    
     /* Hide Streamlit elements */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -510,15 +536,15 @@ def get_traffic_zones_for_map():
     traffic_zones = []
     for hotspot in active:
         if hotspot in TRAFFIC_HOTSPOTS["always"]:
-            color = [244, 67, 54, 100]  # Red
+            color = [255, 152, 0, 120]
         else:
-            color = [255, 193, 7, 80]   # Yellow
+            color = [255, 193, 7, 90]
         
         traffic_zones.append({
             "name": hotspot["name"],
             "lat": hotspot["lat"],
             "lon": hotspot["lon"],
-            "radius": hotspot["radius"],
+            "radius": min(hotspot["radius"], 150),
             "color": color,
             "reason": hotspot["reason"],
         })
@@ -744,22 +770,30 @@ def _suggest_party_bundle(description: str) -> str:
     drink_item = drinks[0] if drinks else None
     dessert_item = desserts[0] if desserts and (is_kids or guests >= 8) else None
 
+    bundle_items = []
     total = sum(p["price"] for p in selected_pizzas)
-    lines = [f"  - **{p['name']}** — \\${p['price']:.2f}" for p in selected_pizzas]
+    lines = []
+    for p in selected_pizzas:
+        lines.append(f"  - **{p['name']}** — \\${p['price']:.2f}")
+        bundle_items.append({"name": p["name"], "price": p["price"], "qty": 1})
     if side_item:
         sides_qty = max(1, guests // 4)
         total += side_item["price"] * sides_qty
         lines.append(f"  - **{side_item['name']}** x{sides_qty} — \\${side_item['price'] * sides_qty:.2f}")
+        bundle_items.append({"name": side_item["name"], "price": side_item["price"], "qty": sides_qty})
     if drink_item:
         drinks_qty = max(1, guests // 4)
         total += drink_item["price"] * drinks_qty
         lines.append(f"  - **{drink_item['name']}** x{drinks_qty} — \\${drink_item['price'] * drinks_qty:.2f}")
+        bundle_items.append({"name": drink_item["name"], "price": drink_item["price"], "qty": drinks_qty})
     if dessert_item:
         total += dessert_item["price"]
         lines.append(f"  - **{dessert_item['name']}** — \\${dessert_item['price']:.2f}")
+        bundle_items.append({"name": dessert_item["name"], "price": dessert_item["price"], "qty": 1})
 
     theme = "Game Day Party Pack 🏈" if is_game_day else "Kids Birthday Bundle 🎂" if is_kids else "Party Bundle 🎉"
-    return f"""**{theme}** for ~{guests} guests\n\n""" + "\n".join(lines) + f"\n\n**Bundle Total: \\${total:.2f}**"
+    display = f"""**{theme}** for ~{guests} guests\n\n""" + "\n".join(lines) + f"\n\n**Bundle Total: \\${total:.2f}**"
+    return display, bundle_items
 
 
 def render_menu_page():
@@ -782,17 +816,22 @@ def render_menu_page():
     render_featured()
 
     # Party Bundle Assistant
-    with st.expander("🎉 Planning a party? Let us help!", expanded=False):
+    with st.expander("🎉 Planning a party? Let us help!", expanded=True):
         party_input = st.text_input(
             "Describe your event and we'll suggest a bundle:",
             placeholder="e.g. Game day with 8 friends, or kids birthday party for 12",
             key="party_input",
         )
         if party_input:
-            suggestion = _suggest_party_bundle(party_input)
-            if suggestion:
-                st.markdown(suggestion)
-                st.caption("_Tap items below to add them to your cart._")
+            display, bundle_items = _suggest_party_bundle(party_input)
+            if display:
+                st.markdown(display)
+                if st.button("🛒 Add Entire Bundle to Cart", type="primary", key="add_bundle"):
+                    for item in bundle_items:
+                        for _ in range(item["qty"]):
+                            add_to_cart(item["name"], item["price"])
+                    st.success(f"Added {sum(i['qty'] for i in bundle_items)} items to your cart!")
+                    st.rerun()
 
     menu_col, cart_col = st.columns([7, 2])
     
@@ -955,7 +994,7 @@ def render_tracking_page():
             
             layers = []
             
-            # Traffic zones layer (render first, behind other elements)
+            # Traffic zones layer (subtle background)
             if traffic_zones:
                 layers.append(pdk.Layer(
                     "ScatterplotLayer",
@@ -964,24 +1003,24 @@ def render_tracking_page():
                     get_color="color",
                     get_radius="radius",
                     pickable=True,
-                    opacity=0.3,
+                    opacity=0.4,
                 ))
             
-            layers.append(pdk.Layer("PathLayer", data=[{"path": route_coords, "color": [0, 122, 255, 200]}], get_path="path", get_color="color", width_scale=20, width_min_pixels=3))
-            # Store marker (orange)
-            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": STORE_LAT, "lon": STORE_LON, "name": "Chicago Loop Pizza"}], get_position=["lon", "lat"], get_color=[255, 87, 51, 255], get_radius=40, pickable=True))
-            # Driver marker (green)
-            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": driver_lat, "lon": driver_lon, "name": "Driver"}], get_position=["lon", "lat"], get_color=[52, 199, 89, 255], get_radius=40, pickable=True))
-            # Customer marker (purple)
-            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": customer_lat, "lon": customer_lon, "name": "You"}], get_position=["lon", "lat"], get_color=[187, 134, 252, 255], get_radius=40, pickable=True))
+            drv_rgba = get_driver_color(order.get("driver_id"))["rgba"]
+            drv_route = drv_rgba[:3] + [200]
+            layers.append(pdk.Layer("PathLayer", data=[{"path": route_coords, "color": drv_route}], get_path="path", get_color="color", get_width=6, width_min_pixels=3))
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": STORE_LAT, "lon": STORE_LON, "name": "Chicago Loop Pizza"}], get_position=["lon", "lat"], get_color=[255, 87, 51, 255], get_radius=60, pickable=True))
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": driver_lat, "lon": driver_lon, "name": "Driver"}], get_position=["lon", "lat"], get_color=drv_rgba, get_radius=50, pickable=True))
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": customer_lat, "lon": customer_lon, "name": "You"}], get_position=["lon", "lat"], get_color=[187, 134, 252, 255], get_radius=50, pickable=True))
             
             st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=13, pitch=45, bearing=0), map_style="dark", height=450), use_container_width=True, height=450)
-            st.markdown("""
+            drv_hex = get_driver_color(order.get("driver_id"))["hex"]
+            st.markdown(f"""
             <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px;margin-top:8px;color:#ccc;">
                 <span><span style="color:#FF5733;">●</span> Store</span>
-                <span><span style="color:#34C759;">●</span> Driver</span>
+                <span><span style="color:{drv_hex};">●</span> Driver</span>
                 <span><span style="color:#BB86FC;">●</span> Your location</span>
-                <span><span style="color:#007AFF;">●</span> Route</span>
+                <span><span style="color:{drv_hex};">●</span> Route</span>
                 <span><span style="color:#FFC107;">◉</span> Traffic Zone</span>
             </div>
             """, unsafe_allow_html=True)
@@ -1007,7 +1046,7 @@ def render_tracking_page():
             
             layers = []
             
-            # Traffic zones layer
+            # Traffic zones layer (subtle background)
             if traffic_zones:
                 layers.append(pdk.Layer(
                     "ScatterplotLayer",
@@ -1016,14 +1055,14 @@ def render_tracking_page():
                     get_color="color",
                     get_radius="radius",
                     pickable=True,
-                    opacity=0.3,
+                    opacity=0.4,
                 ))
             
-            layers.append(pdk.Layer("PathLayer", data=[{"path": route_coords, "color": [0, 122, 255, 120]}], get_path="path", get_color="color", width_scale=20, width_min_pixels=3))
+            layers.append(pdk.Layer("PathLayer", data=[{"path": route_coords, "color": [0, 122, 255, 200]}], get_path="path", get_color="color", get_width=6, width_min_pixels=3))
             # Store marker (orange)
-            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": STORE_LAT, "lon": STORE_LON, "name": "Chicago Loop Pizza"}], get_position=["lon", "lat"], get_color=[255, 87, 51, 255], get_radius=40, pickable=True))
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": STORE_LAT, "lon": STORE_LON, "name": "Chicago Loop Pizza"}], get_position=["lon", "lat"], get_color=[255, 87, 51, 255], get_radius=60, pickable=True))
             # Customer marker (purple)
-            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": customer_lat, "lon": customer_lon, "name": "Your Location"}], get_position=["lon", "lat"], get_color=[187, 134, 252, 255], get_radius=40, pickable=True))
+            layers.append(pdk.Layer("ScatterplotLayer", data=[{"lat": customer_lat, "lon": customer_lon, "name": "Your Location"}], get_position=["lon", "lat"], get_color=[187, 134, 252, 255], get_radius=50, pickable=True))
             
             st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=13, pitch=45, bearing=0), map_style="dark", height=450), use_container_width=True, height=450)
             st.markdown("""

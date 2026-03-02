@@ -4,8 +4,8 @@
 
 A comprehensive demo showcasing **Snowflake Cortex** capabilities for Quick Service Restaurant (QSR) operations, featuring:
 - **Ops Dashboard** — AI Co-Pilot with Cortex Analyst, demand forecasting, anomaly detection, and live order tracking
-- **Customer App** — Mobile-friendly ordering with Party Bundle Assistant
-- **Driver App** — Real-time delivery tracking with late-delivery cheat sheets
+- **Customer App** — Mobile-friendly ordering with Party Bundle Assistant and one-click bundle cart
+- **Driver App** — Real-time delivery tracking with per-driver color coding, late-delivery cheat sheets, and in-app issue reporting
 
 ---
 
@@ -79,7 +79,15 @@ role = "ACCOUNTADMIN"
 
 ### Step 4: Run the Apps
 
-**Option A: Docker (recommended)**
+**Option A: Unified Docker container (recommended)**
+
+```bash
+# Build and run a single container with all three apps via supervisord
+docker build -f Dockerfile.unified -t pizza-demo .
+docker run -d -p 8510:8510 -p 8511:8511 -p 8512:8512 pizza-demo
+```
+
+**Option B: Separate Docker containers**
 
 ```bash
 # Build and run all three apps
@@ -97,7 +105,7 @@ docker run -d -p 8512:8501 -v $(pwd)/shared_state:/shared_state \
   -e PIZZA_STATE_FILE=/shared_state/.pizza_unified_state.json pizza-driver
 ```
 
-**Option B: Run locally**
+**Option C: Run locally**
 
 ```bash
 # Install dependencies
@@ -126,18 +134,21 @@ pizza/
 ├── requirements.txt            # Python dependencies
 │
 ├── # DOCKERFILES
+├── Dockerfile.unified          # Single container with supervisord (all 3 apps)
 ├── Dockerfile.ops              # Ops Dashboard container
 ├── Dockerfile.customer         # Customer App container
 ├── Dockerfile.driver           # Driver App container
+├── supervisord-pizza.conf      # Supervisord config for unified container
 │
 ├── # STREAMLIT APPS
 ├── pizza_ops_assistant.py      # Ops Dashboard + AI Co-Pilot
 ├── customer_app.py             # Customer ordering app
 ├── driver_app.py               # Driver delivery app
-├── menu_data.py                # Shared menu data (synced with Snowflake DIM_PRODUCTS)
+├── menu_data.py                # Shared menu data, driver colors, delivery zones
 ├── unified_state.py            # Cross-app state management (shared JSON file)
 ├── shared_state.py             # Legacy state helpers
 ├── shared_routes.py            # OSRM route fetching and caching
+├── demo_simulation.py          # Demo order simulation engine
 │
 ├── # BACKEND SERVICES (used by Ops app)
 ├── services/
@@ -150,7 +161,7 @@ pizza/
 │   └── persistence.py          # State persistence
 │
 ├── config/
-│   └── settings.py             # App configuration (map colors, store config)
+│   └── settings.py             # App configuration (zones, weather, traffic, menu)
 │
 ├── # SNOWFLAKE SETUP
 ├── setup/
@@ -184,12 +195,19 @@ pizza/
 
 The main operations interface for store managers, with two views:
 
-**Live Orders** — Real-time order pipeline from kitchen to delivery, interactive map with driver routes, and a Capacity vs Demand chart (Altair) showing kitchen utilization over the last 7 days.
+**Live Orders** — Real-time order pipeline from kitchen to delivery, interactive map with per-driver colored routes, and a Capacity vs Demand chart (Altair) showing kitchen utilization over the last 7 days.
+
+**Today's Ops Snapshot** — A live banner showing AI-derived metrics with hover tooltips:
+- **Refunds Avoided** — Estimated savings from AI-optimized routing vs. industry 25% late rate
+- **Avg Route Time** — Average delivery time using OSRM real-time routing
+- **Delays Prevented** — Orders that would have been late without smart dispatch
 
 **AI Co-Pilot** — Unified conversational interface combining:
 - **Quick Actions** — Shift Brief (with Kitchen Prep Checklist), Demand Forecast, Anomaly Scan
 - **Chat** — Natural language queries via Cortex Analyst + Cortex Search
 - **Suggested Questions** — Delivery performance, promo recommendations, customer feedback
+
+**Late Delivery Intelligence** — Expandable cards below the map for each late delivery, showing Cortex-powered root cause analysis and zone-specific rerouting suggestions.
 
 **Sidebar** — Live Intelligence Ticker showing thin crust capacity, kitchen utilization, and worst-store late delivery % from Snowflake.
 
@@ -197,19 +215,52 @@ The main operations interface for store managers, with two views:
 **URL:** http://localhost:8511
 
 Customer ordering interface:
-- Full menu with real food images and shopping cart
-- **Party Bundle Assistant** — Describe your event (e.g., "Game day with 8 friends") and get themed bundle suggestions with pricing
-- Order tracking with live driver location on map
+- Full menu with 30+ items across Pizzas, Sides, Drinks, and Desserts
+- Consistent card layout with real food images and shopping cart
+- **Party Bundle Assistant** — Describe your event (e.g., "Game day with 8 friends") and get themed bundle suggestions with one-click "Add Entire Bundle to Cart"
+- Order tracking with live driver location on map (per-driver color coded)
 - Rating and tipping after delivery
 
 ### 3. Driver App (port 8512)
 **URL:** http://localhost:8512
 
 Mobile-friendly delivery driver interface:
-- Real-time route visualization with OSRM routing
+- Real-time route visualization with OSRM routing and per-driver color coding
 - Order pickup and delivery workflow with ETA tracking
 - **Late-Delivery Cheat Sheet** — Zone-specific routing tips shown as high-contrast notification when delivery is running late
+- **Issue Reporting** — In-app form to report problems (vehicle, road, building access, etc.) with notes, synced to dispatch
 - Delivery celebration screen on completion
+- Delivery history with earnings summary
+
+---
+
+## Per-Driver Color System
+
+Each driver has a unique color used consistently across all three apps (map markers, route lines, legends):
+
+| Driver | Name | Color | Hex |
+|--------|------|-------|-----|
+| DRV001 | Mike Rodriguez | Red | `#FF3B30` |
+| DRV002 | Sarah Chen | Blue | `#007AFF` |
+| DRV003 | James Wilson | Yellow | `#FFCC00` |
+| DRV004 | Emma Thompson | Green | `#34C759` |
+
+---
+
+## Delivery Zones
+
+Orders are generated across 8 Chicago delivery zones with zone-diverse dispatch (no repeat zones in sequence):
+
+| Zone | Risk Level |
+|------|-----------|
+| River North | High |
+| West Loop | High |
+| Loop | Medium |
+| Streeterville | Medium |
+| Gold Coast | High |
+| South Loop | Medium |
+| Old Town | Medium |
+| Lincoln Park | High |
 
 ---
 
@@ -234,6 +285,19 @@ The `pizza_intelligence.yaml` semantic model includes:
 
 ---
 
+## Menu
+
+The menu is defined in `menu_data.py` and aligned with Snowflake `DIM_PRODUCTS`. All items have real food images.
+
+| Category | Items |
+|----------|-------|
+| Pizzas (10) | Classic Pepperoni, Margherita, BBQ Chicken, Veggie Garden, Meat Lovers, Hawaiian Paradise, Supreme Deluxe, Truffle Mushroom, Buffalo Chicken, Four Cheese |
+| Sides (9) | Garlic Breadsticks, Buffalo Wings, Caesar Salad, Stuffed Cheesy Bread, Mozzarella Sticks, Potato Wedges, Chicken Tenders, Mac & Cheese Bites, Onion Rings |
+| Drinks (8) | Coca-Cola, Sprite, Fanta Orange, Dr Pepper, Lemonade, Lemon Iced Tea, Bottled Water, Root Beer |
+| Desserts (7) | Chocolate Lava Cake, Cinnamon Twists, New York Cheesecake, Brownie Bites, Cookie Dough Bites, Churros, Apple Pie Bites |
+
+---
+
 ## Data Consistency
 
 All apps share consistent data aligned with Snowflake:
@@ -244,6 +308,7 @@ All apps share consistent data aligned with Snowflake:
 | Store Location | `menu_data.py` | `DIM_STORES` (Chicago Loop) |
 | Order IDs | `ORD-{5-digit}` sequential | `FACT_ORDERS` |
 | Drivers | `menu_data.py` | (simulated) |
+| Driver Colors | `menu_data.py` | (per-driver RGBA/hex) |
 
 ---
 
@@ -291,6 +356,7 @@ snow sql -c <connection> -f setup/10_test_demo_queries.sql
 | Variable | Description |
 |----------|-------------|
 | `PIZZA_STATE_FILE` | Path to shared state JSON file |
+| `SNOWFLAKE_CONNECTION_NAME` | Snowflake connection name for Python apps |
 | `ORS_API_KEY` | OpenRouteService API key for routing (optional) |
 
 ### Store Location

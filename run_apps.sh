@@ -8,9 +8,9 @@
 #   ./run_apps.sh
 #
 # PORTS:
-#   - Ops Dashboard:  http://localhost:8502
-#   - Driver App:     http://localhost:8503
-#   - Customer App:   http://localhost:8504
+#   - Ops Dashboard:  http://localhost:8510
+#   - Customer App:   http://localhost:8511
+#   - Driver App:     http://localhost:8512
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -33,17 +33,17 @@ echo "Starting apps..."
 echo ""
 
 # Start all apps in background
-streamlit run "$SCRIPT_DIR/pizza_ops_assistant.py" --server.port 8504 --server.headless true &
-streamlit run "$SCRIPT_DIR/driver_app.py" --server.port 8505 --server.headless true &
-streamlit run "$SCRIPT_DIR/customer_app.py" --server.port 8506 --server.headless true &
+streamlit run "$SCRIPT_DIR/pizza_ops_assistant.py" --server.port 8510 --server.headless true &
+streamlit run "$SCRIPT_DIR/customer_app.py" --server.port 8511 --server.headless true &
+streamlit run "$SCRIPT_DIR/driver_app.py" --server.port 8512 --server.headless true &
 
 sleep 3
 
 echo "============================================"
 echo "Apps Running:"
-echo "  Ops Dashboard:  http://localhost:8504"
-echo "  Driver App:     http://localhost:8505"
-echo "  Customer App:   http://localhost:8506"
+echo "  Ops Dashboard:  http://localhost:8510"
+echo "  Customer App:   http://localhost:8511"
+echo "  Driver App:     http://localhost:8512"
 echo "============================================"
 echo ""
 echo "Press Ctrl+C to stop all apps"
